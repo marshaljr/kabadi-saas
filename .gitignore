@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+*.log
+.DS_Store
+coverage/
+
+# Local-only shim copied in for sandboxed typechecking; delete along
+# with this ignore line once `npm install` provides real @types/node.
+# (node_modules/ above already covers it, kept explicit for clarity)

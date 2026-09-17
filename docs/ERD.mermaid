@@ -1,0 +1,398 @@
+%% ============================================================
+%% KABADI SAAS — ENTITY RELATIONSHIP DIAGRAM (source of truth)
+%% Regenerate the PNG with:
+%%   mmdc -i docs/ERD.mermaid -o docs/ERD.png -w 2400 -H 1600
+%% Keep this file in lockstep with migrations/*.sql — see
+%% ARCHITECTURE_CHANGE_RULE in ARCHITECTURE.md.
+%% Version: matches migrations 0001-0008
+%% ============================================================
+
+erDiagram
+
+    %% ---------------- SaaS / Platform layer ----------------
+
+    USERS ||--o{ BUSINESS_MEMBERSHIPS : "holds"
+    BUSINESSES ||--o{ BUSINESS_MEMBERSHIPS : "has"
+    ROLES ||--o{ BUSINESS_MEMBERSHIPS : "assigned via"
+    BUSINESSES ||--o{ ROLES : "defines"
+    ROLES ||--o{ ROLE_PERMISSIONS : "grants"
+    PERMISSIONS ||--o{ ROLE_PERMISSIONS : "granted by"
+    USERS ||--o{ PLATFORM_ADMINS : "may be"
+    USERS ||--o{ PLATFORM_AUDIT_LOGS : "acts in"
+    BUSINESSES ||--o{ PLATFORM_AUDIT_LOGS : "target of"
+
+    PLANS ||--o{ SUBSCRIPTIONS : "subscribed as"
+    BUSINESSES ||--|| SUBSCRIPTIONS : "has one"
+    SUBSCRIPTIONS ||--o{ SUBSCRIPTION_EVENTS : "history"
+    BUSINESSES ||--o{ USAGE_RECORDS : "tracked by"
+
+    USERS {
+        uuid id PK
+        string name
+        string email UK "global, platform-wide unique"
+        string password_hash
+        string status
+        uuid last_active_business_id FK "UX convenience only, never used for authz"
+    }
+
+    BUSINESSES {
+        uuid id PK
+        string name
+        string currency_code
+        string language_code
+        string timezone
+        int fiscal_year_start_month
+        bool negative_stock_allowed
+        timestamptz onboarding_completed_at
+    }
+
+    ROLES {
+        uuid id PK
+        uuid business_id FK
+        string name
+        bool is_system_role
+    }
+
+    PERMISSIONS {
+        uuid id PK
+        string key UK
+        string category
+    }
+
+    ROLE_PERMISSIONS {
+        uuid role_id FK
+        uuid permission_id FK
+    }
+
+    BUSINESS_MEMBERSHIPS {
+        uuid id PK
+        uuid user_id FK
+        uuid business_id FK
+        uuid role_id FK "must belong to same business_id, trigger-enforced"
+        string status
+        timestamptz joined_at
+    }
+
+    PLATFORM_ADMINS {
+        uuid user_id PK "FK to users, separate from business roles entirely"
+        uuid granted_by FK
+    }
+
+    PLATFORM_AUDIT_LOGS {
+        uuid id PK
+        uuid actor_user_id FK
+        uuid target_business_id FK
+        string action
+        jsonb old_values
+        jsonb new_values
+    }
+
+    PLANS {
+        uuid id PK
+        string code UK
+        numeric price_monthly
+        int max_users "NULL = unlimited"
+        int max_workers
+        int max_monthly_transactions
+        bool allow_advanced_accounting
+    }
+
+    SUBSCRIPTIONS {
+        uuid id PK
+        uuid business_id FK "one active subscription per business (unique)"
+        uuid plan_id FK
+        string status
+        timestamptz trial_ends_at
+        timestamptz current_period_end
+    }
+
+    SUBSCRIPTION_EVENTS {
+        uuid id PK
+        uuid subscription_id FK
+        string event_type
+        string provider_event_id UK "idempotent webhook replay guard"
+        jsonb payload
+    }
+
+    USAGE_RECORDS {
+        uuid id PK
+        uuid business_id FK
+        date period_start
+        string metric
+        numeric value
+    }
+
+    %% ---------------- Business core data ----------------
+
+    BUSINESSES ||--o{ CATEGORIES : "owns"
+    BUSINESSES ||--o{ MATERIALS : "owns"
+    CATEGORIES ||--o{ MATERIALS : "classifies"
+    MATERIALS ||--o{ MATERIAL_RATES : "rate history"
+    BUSINESSES ||--o{ WORKERS : "owns"
+    BUSINESSES ||--o{ CUSTOMERS : "owns"
+    BUSINESSES ||--o{ SUPPLIERS : "owns"
+    BUSINESSES ||--o{ PAYMENT_METHODS : "owns"
+
+    CATEGORIES {
+        uuid id PK
+        uuid business_id FK
+        string name
+        string status
+    }
+
+    MATERIALS {
+        uuid id PK
+        uuid business_id FK
+        uuid category_id FK
+        string name
+        string default_unit
+        numeric current_purchase_rate "denormalized, synced by trigger from material_rates"
+        numeric current_sales_rate
+        numeric minimum_stock
+    }
+
+    MATERIAL_RATES {
+        uuid id PK
+        uuid material_id FK
+        numeric purchase_rate
+        numeric sales_rate
+        date effective_from
+        date effective_to "NULL = open-ended"
+        daterange effective_range "generated column, exclusion-constrained: no overlaps per material"
+    }
+
+    WORKERS {
+        uuid id PK
+        uuid business_id FK
+        string worker_code
+        string name
+        numeric opening_balance
+        numeric payable_balance "maintained by services, never by frontend"
+        numeric advance_balance "unconsumed advances, tracked separately from payable"
+        string status
+    }
+
+    CUSTOMERS {
+        uuid id PK
+        uuid business_id FK
+        string customer_code
+        string name
+        numeric opening_balance
+        numeric receivable_balance
+    }
+
+    SUPPLIERS {
+        uuid id PK
+        uuid business_id FK
+        string supplier_code
+        string name
+        numeric opening_balance
+        numeric payable_balance
+    }
+
+    PAYMENT_METHODS {
+        uuid id PK
+        uuid business_id FK
+        string name
+        bool is_cash
+    }
+
+    %% ---------------- Transactions ----------------
+
+    WORKERS ||--o{ PURCHASES : "sells to business"
+    SUPPLIERS ||--o{ PURCHASES : "sells to business"
+    PURCHASES ||--o{ PURCHASE_ITEMS : "line items"
+    MATERIALS ||--o{ PURCHASE_ITEMS : "material"
+
+    CUSTOMERS ||--o{ SALES : "buys from business"
+    SALES ||--o{ SALE_ITEMS : "line items"
+    MATERIALS ||--o{ SALE_ITEMS : "material"
+
+    WORKERS ||--o{ PAYMENTS : "party"
+    CUSTOMERS ||--o{ PAYMENTS : "party"
+    SUPPLIERS ||--o{ PAYMENTS : "party"
+    PAYMENT_METHODS ||--o{ PAYMENTS : "method"
+
+    PAYMENTS ||--o{ WORKER_ADVANCE_APPLICATIONS : "advance payment consumed by"
+    PURCHASES ||--o{ WORKER_ADVANCE_APPLICATIONS : "applied against"
+    WORKERS ||--o{ WORKER_ADVANCE_APPLICATIONS : "worker"
+
+    EXPENSE_CATEGORIES ||--o{ EXPENSES : "categorizes"
+    WORKERS ||--o{ EXPENSES : "optionally linked"
+
+    PURCHASES {
+        uuid id PK
+        uuid business_id FK
+        string purchase_no UK
+        uuid worker_id FK "exactly one of worker_id/supplier_id set"
+        uuid supplier_id FK
+        numeric total_amount
+        numeric paid_amount
+        numeric due_amount "= total_amount - paid_amount, CHECK-enforced"
+        string status "DRAFT | POSTED | CANCELLED | REVERSED"
+    }
+
+    PURCHASE_ITEMS {
+        uuid id PK
+        uuid business_id FK "denormalized from purchases, trigger-synced"
+        uuid purchase_id FK
+        uuid material_id FK
+        numeric quantity
+        numeric unit_price
+        numeric amount
+    }
+
+    SALES {
+        uuid id PK
+        uuid business_id FK
+        string sale_no UK
+        uuid customer_id FK
+        numeric total_amount
+        numeric paid_amount
+        numeric due_amount
+        string status
+    }
+
+    SALE_ITEMS {
+        uuid id PK
+        uuid business_id FK "denormalized from sales, trigger-synced"
+        uuid sale_id FK
+        uuid material_id FK
+        numeric quantity
+        numeric unit_price
+        numeric amount
+        numeric cost_per_unit "set by costing service at POSTING, never client-supplied"
+        numeric cogs_amount
+    }
+
+    PAYMENTS {
+        uuid id PK
+        uuid business_id FK
+        string payment_no UK
+        string direction "IN | OUT | ADJUSTMENT"
+        uuid worker_id FK "exactly one of worker/customer/supplier set"
+        uuid customer_id FK
+        uuid supplier_id FK
+        uuid payment_method_id FK
+        numeric amount
+        bool is_advance "TRUE only for unlinked worker OUT payments"
+        string status
+    }
+
+    WORKER_ADVANCE_APPLICATIONS {
+        uuid id PK
+        uuid worker_id FK
+        uuid advance_payment_id FK "the original is_advance=TRUE payment"
+        uuid purchase_id FK "purchase the advance was applied against"
+        numeric amount_applied
+    }
+
+    EXPENSE_CATEGORIES {
+        uuid id PK
+        uuid business_id FK
+        string name
+    }
+
+    EXPENSES {
+        uuid id PK
+        uuid business_id FK
+        string expense_no UK
+        uuid expense_category_id FK
+        uuid worker_id FK "optional"
+        numeric amount
+        string status
+    }
+
+    %% ---------------- Inventory ----------------
+
+    MATERIALS ||--o{ STOCK_MOVEMENTS : "moves"
+
+    STOCK_MOVEMENTS {
+        uuid id PK
+        uuid business_id FK
+        uuid material_id FK
+        string movement_type "PURCHASE_IN | SALE_OUT | ... | OPENING_STOCK"
+        string reference_type
+        uuid reference_id
+        numeric quantity_in
+        numeric quantity_out
+        numeric unit_cost "NOT NULL — cost basis required for every movement"
+    }
+
+    %% ---------------- Accounting ----------------
+
+    BUSINESSES ||--o{ ACCOUNTS : "chart of accounts"
+    ACCOUNTS ||--o{ JOURNAL_ENTRY_LINES : "posted to"
+    BUSINESSES ||--o{ JOURNAL_ENTRIES : "owns"
+    JOURNAL_ENTRIES ||--o{ JOURNAL_ENTRY_LINES : "lines"
+
+    ACCOUNTS {
+        uuid id PK
+        uuid business_id FK
+        string account_code UK
+        string name
+        string type "ASSET | LIABILITY | EQUITY | REVENUE | COGS | EXPENSE"
+        uuid parent_account_id FK
+        bool is_system_account
+    }
+
+    JOURNAL_ENTRIES {
+        uuid id PK
+        uuid business_id FK
+        string entry_no UK
+        string reference_type
+        uuid reference_id
+        string status "POSTED | REVERSED"
+    }
+
+    JOURNAL_ENTRY_LINES {
+        uuid id PK
+        uuid business_id FK "denormalized from journal_entries, trigger-synced, enables direct RLS"
+        uuid journal_entry_id FK
+        uuid account_id FK
+        numeric debit "exactly one of debit/credit > 0, CHECK-enforced"
+        numeric credit
+    }
+
+    %% ---------------- Operations ----------------
+
+    BUSINESSES ||--o{ DAILY_CLOSINGS : "closes"
+    BUSINESSES ||--o{ AUDIT_LOGS : "tenant activity"
+    BUSINESSES ||--o{ ATTACHMENTS : "files"
+    BUSINESSES ||--o{ NOTIFICATIONS : "in-app alerts"
+
+    DAILY_CLOSINGS {
+        uuid id PK
+        uuid business_id FK
+        date closing_date UK
+        numeric expected_closing_cash
+        numeric actual_closing_cash
+        numeric cash_difference
+    }
+
+    AUDIT_LOGS {
+        uuid id PK
+        uuid business_id FK
+        uuid user_id FK
+        string table_name
+        uuid record_id
+        string action
+        jsonb old_values
+        jsonb new_values
+    }
+
+    ATTACHMENTS {
+        uuid id PK
+        uuid business_id FK
+        string table_name
+        uuid record_id
+        string file_url
+    }
+
+    NOTIFICATIONS {
+        uuid id PK
+        uuid business_id FK
+        uuid user_id FK
+        string type
+        bool is_read
+    }
