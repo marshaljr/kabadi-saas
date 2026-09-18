@@ -25,6 +25,7 @@ export interface AppEnv {
   port: number;
 
   databaseUrl: string;
+  databaseMigrationUrl: string;
   // the role the app pool connects as. Must NOT be a superuser or the
   // table owner, or Row-Level Security (migration 0008) is silently
   // bypassed for every query.
@@ -44,6 +45,7 @@ function loadEnv(): AppEnv {
     port: Number(optional("PORT", "3000")),
 
     databaseUrl: nodeEnv === "test" ? optional("DATABASE_URL", "") : required("DATABASE_URL"),
+    databaseMigrationUrl: nodeEnv === "test" ? optional("DATABASE_MIGRATION_URL", "") : required("DATABASE_MIGRATION_URL"),
     databaseAppRole: optional("DATABASE_APP_ROLE", "kabadi_app"),
 
     jwtSecret: nodeEnv === "test" ? optional("JWT_SECRET", "test-secret-not-for-production") : required("JWT_SECRET"),

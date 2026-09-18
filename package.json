@@ -9,7 +9,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts",
+    "test": "node --env-file=.env ./node_modules/tsx/dist/cli.mjs --test tests/*.test.ts tests/integration/*.test.ts",
     "migrate": "tsx src/db/migrate.ts",
     "seed": "tsx src/db/seed.ts",
     "dev": "tsx watch src/server.ts"

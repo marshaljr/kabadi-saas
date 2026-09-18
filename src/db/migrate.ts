@@ -6,7 +6,7 @@
  * inside its own transaction so a failing migration never leaves the
  * schema half-applied.
  *
- * This connects as whatever DATABASE_URL specifies. In practice that
+ * This connects as whatever DATABASE_MIGRATION_URL specifies. In practice that
  * should be a migration-owner role with DDL rights — NOT the RLS
  * -restricted app role that src/db/pool.ts uses for request handling
  * (see the note in db/tenantContext.ts about superusers/owners
@@ -14,7 +14,7 @@
  * granting the app role DDL rights would be a much bigger risk).
  *
  * Usage:
- *   DATABASE_URL=postgres://... npm run migrate
+ *   DATABASE_MIGRATION_URL=postgres://... npm run migrate
  */
 
 import { readdirSync, readFileSync } from "node:fs";
@@ -41,7 +41,7 @@ async function getAppliedMigrations(pool: Pool): Promise<Set<string>> {
 }
 
 export async function runMigrations(): Promise<void> {
-  const pool = new Pool({ connectionString: env.databaseUrl });
+  const pool = new Pool({ connectionString: env.databaseMigrationUrl });
 
   try {
     await ensureMigrationsTable(pool);
