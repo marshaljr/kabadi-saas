@@ -17,6 +17,29 @@ export class HttpError extends Error {
   }
 }
 
+/**
+ * AuthError's `.code` distinguishes two genuinely different HTTP
+ * situations that auth.service.ts's single error class covers:
+ *   - the caller isn't authenticated at all, or their credentials/
+ *     account are invalid → 401 Unauthorized
+ *       (INVALID_CREDENTIALS, ACCOUNT_INACTIVE, EMAIL_TAKEN)
+ *   - the caller IS authenticated (a valid token was presented) but
+ *     isn't authorized for the specific business they asked for →
+ *     403 Forbidden
+ *       (NOT_A_MEMBER, MEMBERSHIP_INACTIVE)
+ * Read via a duck-typed `.code` property rather than an `instanceof
+ * AuthError` check, for the same reason as the `.name` check above:
+ * this module must not import from modules/auth to avoid a
+ * dependency cycle.
+ */
+function authErrorStatusCode(err: Error): number {
+  const code = (err as { code?: unknown }).code;
+  if (code === "NOT_A_MEMBER" || code === "MEMBERSHIP_INACTIVE") {
+    return 403;
+  }
+  return 401;
+}
+
 export function toSafeErrorResponse(err: unknown): { statusCode: number; body: { error: string; code?: string } } {
   if (err instanceof HttpError) {
     return { statusCode: err.statusCode, body: { error: err.message, code: err.publicCode } };
@@ -27,7 +50,7 @@ export function toSafeErrorResponse(err: unknown): { statusCode: number; body: {
   // duck-typed `.name` rather than importing them here, to avoid a
   // dependency cycle between lib/ and modules/.
   if (err instanceof Error && (err.name === "AuthError" || err.name === "ForbiddenError")) {
-    const statusCode = err.name === "ForbiddenError" ? 403 : 401;
+    const statusCode = err.name === "ForbiddenError" ? 403 : authErrorStatusCode(err);
     return { statusCode, body: { error: err.message } };
   }
 

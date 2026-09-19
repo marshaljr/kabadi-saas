@@ -2,6 +2,44 @@
 
 All notable changes to this project are recorded here, newest first.
 
+## [Phase 1 cleanup]
+
+### Already present in this codebase (not introduced by this entry — documented here because it was previously undocumented)
+- `migrations/0009_role_permissions_rls.sql` — fixes a structural RLS gap:
+  `role_permissions` had no Row-Level Security. Since the table has no
+  `business_id` column of its own (tenancy is indirect, through `role_id
+  → roles.business_id`), the policy uses an `EXISTS` subquery rather
+  than the generic `business_id = current_business_id()` pattern used
+  elsewhere.
+- `tests/integration/tenant-isolation.test.ts` — a real-database
+  integration test proving RLS blocks cross-tenant SELECT/UPDATE/INSERT
+  on both `workers` and `role_permissions`.
+- The `.env`-aware `npm test` script
+  (`node --env-file=.env ... --test tests/*.test.ts
+  tests/integration/*.test.ts`), and the accompanying split of
+  `DATABASE_URL` (app runtime) from `DATABASE_MIGRATION_URL` (migration
+  runner) in `src/config/env.ts` / `src/db/migrate.ts`.
+
+### Added
+- `tests/httpError.test.ts` — 8 tests locking in the `AuthError` → HTTP
+  status mapping introduced below: every `AuthError` code, plus
+  `ForbiddenError`, `HttpError` passthrough, and the generic-500/
+  no-leakage fallback for unrecognized errors.
+
+### Fixed
+- **HTTP status mismatch in error handling** (`src/lib/httpError.ts`):
+  `AuthError` was unconditionally mapped to `401`, even when the caller
+  was validly authenticated but simply not authorized for the requested
+  business. Corrected mapping:
+  - `NOT_A_MEMBER` → `403`
+  - `MEMBERSHIP_INACTIVE` → `403`
+  - `INVALID_CREDENTIALS` → `401` (unchanged)
+  - `ACCOUNT_INACTIVE` → `401` (unchanged)
+  - `EMAIL_TAKEN` → `401` (unchanged)
+
+  The safe-error-response shape (no raw errors ever reach the client) is
+  unchanged; `ForbiddenError` continues to always map to `403`.
+
 ## [Phase 1] — Project Foundation & Authentication Foundation
 
 ### Added
