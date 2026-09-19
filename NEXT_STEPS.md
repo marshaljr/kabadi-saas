@@ -16,24 +16,17 @@ Still open from that list:
    already small, framework-agnostic async functions — this should be a
    thin wrapper, not a rewrite.
 
-## Action items from this round of cleanup
+## Phase 1 cleanup status
 
-- **Run `npm test` on a machine with real `pg` installed and a real
-  Postgres instance** to get an actual, verified pass count including
-  `tests/httpError.test.ts` (8 new tests) and
-  `tests/integration/tenant-isolation.test.ts`. In the sandbox that
-  produced this round's changes, the result was 23/24 (1 failure caused
-  by `pg` not being installable there — see `DEVELOPMENT_STATUS.md`).
-  That sandbox result is NOT a substitute for running it for real.
-- **Confirm whether `src/types/pg-shim.d.ts` is still needed.** It was
-  left untouched in this round (out of scope). Check whether
-  `node_modules/@types/pg` exists in the actual project checkout — if
-  it does and `npm run typecheck` still passes with the shim removed,
-  delete it.
-- Apply the `claude/phase1-cleanup` branch/patch from this round and
-  merge it into `main` once reviewed (not done automatically — this
-  round explicitly did not commit to or push `main`, and did not push
-  anywhere at all).
+Phase 1 cleanup has been applied, reviewed, merged into `main`, and
+verified locally.
+
+Verified on the project owner's Mac:
+- `npm run typecheck` → 0 errors
+- `npm test` → 24 passed, 0 failed, 0 skipped
+- Real PostgreSQL tenant-isolation integration test → passed
+- Temporary `src/types/pg-shim.d.ts` → removed after confirming
+  `@types/pg` is installed and typecheck remains clean
 
 ## Phase 2 — SaaS Foundation (next phase of feature work)
 

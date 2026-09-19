@@ -50,34 +50,24 @@ original ERD/schema.
 - Documentation: `README.md`, `ARCHITECTURE.md`, `DATABASE.md`,
   `TESTING.md`, `ENVIRONMENT.md`, `API.md`, `DEPLOYMENT.md`
 
-**Test results — reported precisely, from the environment that actually
-ran them (this sandbox, on the `claude/phase1-cleanup` branch):**
-- `npm run typecheck` equivalent (`tsc --noEmit`) → **0 errors**
-- Test run → **23 passed, 1 failed, out of 24 total.** The 1 failure is
-  `tests/integration/tenant-isolation.test.ts`, which fails with
-  `ERR_MODULE_NOT_FOUND: Cannot find package 'pg'`. This sandbox has no
-  network access, so the real `pg` package was never installed here —
-  this is an environment limitation, not a code defect, and neither
-  `src/db/pool.ts` nor the test file were modified in this round. All
-  23 database-independent tests pass, including all 8 new `httpError`
-  tests.
-- **This has not been run on the project owner's Mac as part of this
-  round.** Whether it produces 24/24 there (where `pg` and a real
-  Postgres instance are actually available) has not been confirmed by
-  either party as of this writing — that confirmation is a pending
-  action item, not a stated fact.
+**Test results — verified on the project owner's Mac:**
+- `npm run typecheck` → **0 errors**
+- `npm test` → **24 passed, 0 failed, 0 skipped**
+- The real PostgreSQL integration test
+  (`tests/integration/tenant-isolation.test.ts`) passed against the
+  local `kabadi_saas` database.
+- The 8 new HTTP error-status tests also passed.
+- `src/types/pg-shim.d.ts` was removed after confirming
+  `node_modules/@types/pg` is installed and `npm run typecheck` still
+  passes without the shim.
 
-**Known limitations (environment, not design):**
-- This round of cleanup was done in a network-isolated sandbox (no
-  `npm install`, no real Postgres, no GitHub access — cloned from a git
-  bundle instead). A locally-vendored copy of `@types/node` and the
-  globally-installed `tsx`/`typescript` were used to run
-  `typecheck`/tests; `src/types/pg-shim.d.ts` was left untouched (out of
-  scope for this round).
-- No git push to GitHub was performed or attempted from this sandbox —
-  GitHub is unreachable from here. The `claude/phase1-cleanup` branch
-  and its commit exist only in this sandbox; applying/pushing them is a
-  manual step for whoever has GitHub access.
+**Sandbox limitation for Claude cleanup work:**
+- Claude's network-isolated sandbox could not install/use the real `pg`
+  package or access GitHub directly. Its reported sandbox test result
+  for the cleanup branch was 23 passed, 1 failed because the integration
+  test could not import `pg`. This was not the result of the project
+  owner's local environment and is not the project's verified test
+  result.
 
 **Not implemented in Phase 1 (by design, deferred to later phases):**
 - Business creation / onboarding flow
