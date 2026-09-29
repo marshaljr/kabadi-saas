@@ -16,7 +16,11 @@
  *   GET  /health
  */
 
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
 import { env } from "./config/env.js";
 import {
   AuthError,
@@ -28,7 +32,9 @@ import {
 } from "./modules/auth/auth.service.js";
 import { toSafeErrorResponse } from "./lib/httpError.js";
 
-async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+async function readJsonBody(
+  req: IncomingMessage,
+): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
     chunks.push(chunk as Buffer);
@@ -44,14 +50,24 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
 function getBearerToken(req: IncomingMessage): string {
   const header = req.headers.authorization;
   if (!header || !header.startsWith("Bearer ")) {
-    throw new AuthError("Missing or malformed Authorization header", "INVALID_CREDENTIALS");
+    throw new AuthError(
+      "Missing or malformed Authorization header",
+      "INVALID_CREDENTIALS",
+    );
   }
   return header.slice("Bearer ".length);
 }
 
-function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
+function sendJson(
+  res: ServerResponse,
+  statusCode: number,
+  body: unknown,
+): void {
   const payload = JSON.stringify(body);
-  res.writeHead(statusCode, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) });
+  res.writeHead(statusCode, {
+    "Content-Type": "application/json",
+    "Content-Length": Buffer.byteLength(payload),
+  });
   res.end(payload);
 }
 
@@ -64,9 +80,16 @@ const routes: Record<string, Record<string, Handler>> = {
   "/api/auth/signup": {
     POST: async (req, res) => {
       const body = await readJsonBody(req);
-      const { name, email, password } = body as { name?: string; email?: string; password?: string };
+      const { name, email, password } = body as {
+        name?: string;
+        email?: string;
+        password?: string;
+      };
       if (!name || !email || !password) {
-        throw new AuthError("name, email and password are all required", "INVALID_CREDENTIALS");
+        throw new AuthError(
+          "name, email and password are all required",
+          "INVALID_CREDENTIALS",
+        );
       }
       const result = await signup({ name, email, password });
       sendJson(res, 201, result);
@@ -77,7 +100,10 @@ const routes: Record<string, Record<string, Handler>> = {
       const body = await readJsonBody(req);
       const { email, password } = body as { email?: string; password?: string };
       if (!email || !password) {
-        throw new AuthError("email and password are required", "INVALID_CREDENTIALS");
+        throw new AuthError(
+          "email and password are required",
+          "INVALID_CREDENTIALS",
+        );
       }
       const result = await login({ email, password });
       sendJson(res, 200, result);
@@ -107,7 +133,10 @@ const routes: Record<string, Record<string, Handler>> = {
 };
 
 export const server = createServer((req, res) => {
-  const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+  const url = new URL(
+    req.url ?? "/",
+    `http://${req.headers.host ?? "localhost"}`,
+  );
   const routeHandlers = routes[url.pathname];
   const handler = routeHandlers?.[req.method ?? "GET"];
 
@@ -122,7 +151,8 @@ export const server = createServer((req, res) => {
   });
 });
 
-const isMainModule = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
+const isMainModule =
+  process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
 if (isMainModule) {
   server.listen(env.port, () => {
     console.log(`kabadi-saas API listening on :${env.port}`);
