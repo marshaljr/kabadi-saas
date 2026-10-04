@@ -14,8 +14,10 @@
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import { env } from "../../config/env.js";
-import { withGlobalContext, withUserContext,
-  withTenantContext 
+import {
+  withGlobalContext,
+  withUserContext,
+  withTenantContext,
 } from "../../db/tenantContext.js";
 import { signJwt, verifyJwt, type JwtPayload } from "../../lib/jwt.js";
 import { hashPassword, verifyPassword } from "../../lib/password.js";
@@ -23,7 +25,12 @@ import { hashPassword, verifyPassword } from "../../lib/password.js";
 export class AuthError extends Error {
   constructor(
     message: string,
-    public readonly code: "EMAIL_TAKEN" | "INVALID_CREDENTIALS" | "ACCOUNT_INACTIVE" | "NOT_A_MEMBER" | "MEMBERSHIP_INACTIVE",
+    public readonly code:
+      | "EMAIL_TAKEN"
+      | "INVALID_CREDENTIALS"
+      | "ACCOUNT_INACTIVE"
+      | "NOT_A_MEMBER"
+      | "MEMBERSHIP_INACTIVE",
   ) {
     super(message);
     this.name = "AuthError";
@@ -72,23 +79,41 @@ function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-function toPublicUser(row: { id: string; name: string; email: string; status: string }): PublicUser {
+function toPublicUser(row: {
+  id: string;
+  name: string;
+  email: string;
+  status: string;
+}): PublicUser {
   return { id: row.id, name: row.name, email: row.email, status: row.status };
 }
 
-export async function signup(input: SignupInput): Promise<{ user: PublicUser; identityToken: string }> {
+export async function signup(
+  input: SignupInput,
+): Promise<{ user: PublicUser; identityToken: string }> {
   const email = normalizeEmail(input.email);
 
   return withGlobalContext(async (client: PoolClient) => {
-    const existing = await client.query<{ id: string }>("SELECT id FROM users WHERE email = $1", [email]);
+    const existing = await client.query<{ id: string }>(
+      "SELECT id FROM users WHERE email = $1",
+      [email],
+    );
     if (existing.rowCount && existing.rowCount > 0) {
-      throw new AuthError("An account with this email already exists", "EMAIL_TAKEN");
+      throw new AuthError(
+        "An account with this email already exists",
+        "EMAIL_TAKEN",
+      );
     }
 
     const passwordHash = await hashPassword(input.password);
     const id = randomUUID();
 
-    const result = await client.query<{ id: string; name: string; email: string; status: string }>(
+    const result = await client.query<{
+      id: string;
+      name: string;
+      email: string;
+      status: string;
+    }>(
       `INSERT INTO users (id, name, email, password_hash)
        VALUES ($1, $2, $3, $4)
        RETURNING id, name, email, status`,
@@ -100,12 +125,18 @@ export async function signup(input: SignupInput): Promise<{ user: PublicUser; id
       throw new Error("Failed to create user");
     }
     const user = toPublicUser(row);
-    const identityToken = signJwt({ sub: user.id }, env.jwtSecret, env.jwtAccessTokenTtlSeconds);
+    const identityToken = signJwt(
+      { sub: user.id },
+      env.jwtSecret,
+      env.jwtAccessTokenTtlSeconds,
+    );
     return { user, identityToken };
   });
 }
 
-export async function login(input: LoginInput): Promise<{ user: PublicUser; identityToken: string }> {
+export async function login(
+  input: LoginInput,
+): Promise<{ user: PublicUser; identityToken: string }> {
   const email = normalizeEmail(input.email);
 
   return withGlobalContext(async (client: PoolClient) => {
@@ -115,7 +146,10 @@ export async function login(input: LoginInput): Promise<{ user: PublicUser; iden
       email: string;
       status: string;
       password_hash: string;
-    }>("SELECT id, name, email, status, password_hash FROM users WHERE email = $1", [email]);
+    }>(
+      "SELECT id, name, email, status, password_hash FROM users WHERE email = $1",
+      [email],
+    );
 
     const row = result.rows[0];
     // Deliberately identical error for "no such email" and "wrong
@@ -134,10 +168,16 @@ export async function login(input: LoginInput): Promise<{ user: PublicUser; iden
       throw new AuthError("This account is not active", "ACCOUNT_INACTIVE");
     }
 
-    await client.query("UPDATE users SET last_login_at = now() WHERE id = $1", [row.id]);
+    await client.query("UPDATE users SET last_login_at = now() WHERE id = $1", [
+      row.id,
+    ]);
 
     const user = toPublicUser(row);
-    const identityToken = signJwt({ sub: user.id }, env.jwtSecret, env.jwtAccessTokenTtlSeconds);
+    const identityToken = signJwt(
+      { sub: user.id },
+      env.jwtSecret,
+      env.jwtAccessTokenTtlSeconds,
+    );
     return { user, identityToken };
   });
 }
@@ -150,7 +190,9 @@ export async function login(input: LoginInput): Promise<{ user: PublicUser; iden
  * this query is allowed to see rows across businesses despite RLS
  * being enabled on that table.
  */
-export async function listMyBusinesses(userId: string): Promise<MembershipSummary[]> {
+export async function listMyBusinesses(
+  userId: string,
+): Promise<MembershipSummary[]> {
   return withUserContext(userId, async (client) => {
     const result = await client.query<{
       business_id: string;
@@ -209,11 +251,17 @@ export async function selectActiveBusiness(
     const row = result.rows[0];
 
     if (!row) {
-      throw new AuthError("You are not a member of this business", "NOT_A_MEMBER");
+      throw new AuthError(
+        "You are not a member of this business",
+        "NOT_A_MEMBER",
+      );
     }
 
     if (row.status !== "ACTIVE") {
-      throw new AuthError("Your membership in this business is not active", "MEMBERSHIP_INACTIVE");
+      throw new AuthError(
+        "Your membership in this business is not active",
+        "MEMBERSHIP_INACTIVE",
+      );
     }
 
     return row;
@@ -222,7 +270,10 @@ export async function selectActiveBusiness(
   // Membership is now verified. Enter the business context so RLS
   // permits access to the role belonging to that business.
   return withTenantContext(userId, businessId, async (client) => {
-    const membershipResult = await client.query<{ role_id: string; status: string }>(
+    const membershipResult = await client.query<{
+      role_id: string;
+      status: string;
+    }>(
       `SELECT role_id, status
        FROM business_memberships
        WHERE user_id = $1 AND business_id = $2`,
@@ -232,11 +283,17 @@ export async function selectActiveBusiness(
     const currentMembership = membershipResult.rows[0];
 
     if (!currentMembership) {
-      throw new AuthError("You are not a member of this business", "NOT_A_MEMBER");
+      throw new AuthError(
+        "You are not a member of this business",
+        "NOT_A_MEMBER",
+      );
     }
 
     if (currentMembership.status !== "ACTIVE") {
-      throw new AuthError("Your membership in this business is not active", "MEMBERSHIP_INACTIVE");
+      throw new AuthError(
+        "Your membership in this business is not active",
+        "MEMBERSHIP_INACTIVE",
+      );
     }
 
     const roleResult = await client.query<{ name: string }>(
@@ -258,7 +315,11 @@ export async function selectActiveBusiness(
     );
 
     const accessToken = signJwt(
-      { sub: userId, businessId, roleId: membership.role_id } satisfies BusinessScopedTokenPayload,
+      {
+        sub: userId,
+        businessId,
+        roleId: membership.role_id,
+      } satisfies BusinessScopedTokenPayload,
       env.jwtSecret,
       env.jwtAccessTokenTtlSeconds,
     );
@@ -275,7 +336,9 @@ export function verifyIdentityToken(token: string): IdentityTokenPayload {
   return verifyJwt<IdentityTokenPayload>(token, env.jwtSecret);
 }
 
-export function verifyBusinessScopedToken(token: string): BusinessScopedTokenPayload {
+export function verifyBusinessScopedToken(
+  token: string,
+): BusinessScopedTokenPayload {
   const payload = verifyJwt<BusinessScopedTokenPayload>(token, env.jwtSecret);
   if (!payload.businessId || !payload.roleId) {
     throw new Error("Token is not business-scoped");
