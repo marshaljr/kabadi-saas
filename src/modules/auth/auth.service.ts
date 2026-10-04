@@ -14,7 +14,9 @@
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import { env } from "../../config/env.js";
-import { withGlobalContext, withUserContext } from "../../db/tenantContext.js";
+import { withGlobalContext, withUserContext,
+  withTenantContext 
+} from "../../db/tenantContext.js";
 import { signJwt, verifyJwt, type JwtPayload } from "../../lib/jwt.js";
 import { hashPassword, verifyPassword } from "../../lib/password.js";
 
@@ -193,32 +195,79 @@ export async function selectActiveBusiness(
   userId: string,
   businessId: string,
 ): Promise<{ accessToken: string; roleId: string; roleName: string }> {
-  return withUserContext(userId, async (client) => {
-    const result = await client.query<{ role_id: string; role_name: string; status: string }>(
-      `SELECT bm.role_id, r.name AS role_name, bm.status
-       FROM business_memberships bm
-       JOIN roles r ON r.id = bm.role_id
-       WHERE bm.user_id = $1 AND bm.business_id = $2`,
+  // Verify membership first while only the user's identity is in
+  // the RLS context. The business_memberships policy explicitly
+  // allows a user to read their own membership rows.
+  const membership = await withUserContext(userId, async (client) => {
+    const result = await client.query<{ role_id: string; status: string }>(
+      `SELECT role_id, status
+       FROM business_memberships
+       WHERE user_id = $1 AND business_id = $2`,
       [userId, businessId],
     );
 
     const row = result.rows[0];
+
     if (!row) {
       throw new AuthError("You are not a member of this business", "NOT_A_MEMBER");
     }
+
     if (row.status !== "ACTIVE") {
       throw new AuthError("Your membership in this business is not active", "MEMBERSHIP_INACTIVE");
     }
 
-    await client.query("UPDATE users SET last_active_business_id = $1 WHERE id = $2", [businessId, userId]);
+    return row;
+  });
+
+  // Membership is now verified. Enter the business context so RLS
+  // permits access to the role belonging to that business.
+  return withTenantContext(userId, businessId, async (client) => {
+    const membershipResult = await client.query<{ role_id: string; status: string }>(
+      `SELECT role_id, status
+       FROM business_memberships
+       WHERE user_id = $1 AND business_id = $2`,
+      [userId, businessId],
+    );
+
+    const currentMembership = membershipResult.rows[0];
+
+    if (!currentMembership) {
+      throw new AuthError("You are not a member of this business", "NOT_A_MEMBER");
+    }
+
+    if (currentMembership.status !== "ACTIVE") {
+      throw new AuthError("Your membership in this business is not active", "MEMBERSHIP_INACTIVE");
+    }
+
+    const roleResult = await client.query<{ name: string }>(
+      `SELECT name
+       FROM roles
+       WHERE id = $1 AND business_id = $2`,
+      [membership.role_id, businessId],
+    );
+
+    const role = roleResult.rows[0];
+
+    if (!role) {
+      throw new Error("Membership role could not be resolved");
+    }
+
+    await client.query(
+      "UPDATE users SET last_active_business_id = $1 WHERE id = $2",
+      [businessId, userId],
+    );
 
     const accessToken = signJwt(
-      { sub: userId, businessId, roleId: row.role_id } satisfies BusinessScopedTokenPayload,
+      { sub: userId, businessId, roleId: membership.role_id } satisfies BusinessScopedTokenPayload,
       env.jwtSecret,
       env.jwtAccessTokenTtlSeconds,
     );
 
-    return { accessToken, roleId: row.role_id, roleName: row.role_name };
+    return {
+      accessToken,
+      roleId: membership.role_id,
+      roleName: role.name,
+    };
   });
 }
 

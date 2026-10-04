@@ -57,6 +57,23 @@ test("ForbiddenError always maps to 403 regardless of any code", () => {
   assert.equal(statusCode, 403);
 });
 
+test("BusinessError with NAME_REQUIRED maps to 400", () => {
+  const err = new Error("Business name is required") as Error & { code: string };
+  err.name = "BusinessError";
+  err.code = "NAME_REQUIRED";
+  const { statusCode, body } = toSafeErrorResponse(err);
+  assert.equal(statusCode, 400);
+  assert.equal(body.error, "Business name is required");
+});
+
+test("BusinessError with INVALID_PLAN maps to 400", () => {
+  const err = new Error("Unknown or inactive plan code: BOGUS") as Error & { code: string };
+  err.name = "BusinessError";
+  err.code = "INVALID_PLAN";
+  const { statusCode } = toSafeErrorResponse(err);
+  assert.equal(statusCode, 400);
+});
+
 test("an unrecognized error maps to 500 with a generic message (no leakage)", () => {
   const { statusCode, body } = toSafeErrorResponse(new Error("some raw internal detail"));
   assert.equal(statusCode, 500);

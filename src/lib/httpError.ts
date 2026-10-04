@@ -54,6 +54,14 @@ export function toSafeErrorResponse(err: unknown): { statusCode: number; body: {
     return { statusCode, body: { error: err.message } };
   }
 
+  // BusinessError (modules/business/business.service.ts) is a client
+  // input-validation problem (bad business name, unknown plan code),
+  // not an auth failure — 400 Bad Request. Same duck-typed `.name`
+  // approach, same no-import-cycle reason as above.
+  if (err instanceof Error && err.name === "BusinessError") {
+    return { statusCode: 400, body: { error: err.message } };
+  }
+
   // Anything else is unexpected: log full details server-side, leak
   // nothing to the client.
   console.error("[unhandled error]", err);

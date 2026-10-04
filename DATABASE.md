@@ -20,12 +20,23 @@ command is a no-op for files already recorded.
 | `0006_accounting.sql` | `accounts`, `journal_entries`, `journal_entry_lines`, `validate_journal_entry_balance()`, `seed_default_accounts()` |
 | `0007_operations.sql` | `daily_closings`, `audit_logs`, `attachments`, `notifications` |
 | `0008_rls_policies.sql` | Row-Level Security on every tenant table |
+| `0009_role_permissions_rls.sql` | Fixes an RLS gap: `role_permissions` had none (no `business_id` column of its own — tenancy is indirect through `role_id → roles.business_id`, so this uses an `EXISTS` subquery policy) |
 
 Never edit an already-applied migration file. A schema change ships as a
-new numbered file (`0009_...sql`), per the project's change-management
-rule — see the "ARCHITECTURE CHANGE & DATABASE MIGRATION RULE" the product
-owner specified: preserve data, never destructive raw SQL against
-production, always a versioned migration.
+new numbered file (`0010_...sql`, and so on), per the project's
+change-management rule — see the "ARCHITECTURE CHANGE & DATABASE
+MIGRATION RULE" the product owner specified: preserve data, never
+destructive raw SQL against production, always a versioned migration.
+
+**Phase 2 (business onboarding, roles/permissions seeding, trial
+subscriptions, usage tracking, platform-admin foundation) required no
+new migration.** Every table and function it needed —
+`business_memberships`, `roles`, `permissions`/`role_permissions`,
+`accounts` + `seed_default_accounts()`, `plans`/`subscriptions`/
+`subscription_events`, `usage_records`, `platform_admins` — already
+existed from `0001`/`0002`/`0006`. Phase 2 is application code only;
+see `src/modules/business/`, `src/modules/usage/`,
+`src/modules/admin/`.
 
 ## Multi-tenancy at a glance
 
@@ -35,6 +46,14 @@ production, always a versioned migration.
 - Every business-owned table carries `business_id` and has RLS enforcing
   it — see `ARCHITECTURE.md`'s "Tenant isolation contract" section for the
   full mechanism and the session-variable contract the app must uphold
+- **`businesses` itself has no `DELETE` RLS policy** (only `SELECT`/
+  `UPDATE`/`INSERT` — see `migrations/0008_rls_policies.sql`). This is
+  intentional, not an oversight discovered-and-left-unfixed: the table
+  has a `deleted_at` column, so archiving a business is a soft-delete
+  (`UPDATE businesses SET deleted_at = now() WHERE id = ...`), consistent
+  with the "never permanently delete" pattern used elsewhere (materials,
+  categories, workers, etc. — Master Build Prompt section 7). A hard
+  `DELETE` on `businesses` is simply never a supported operation.
 
 ## Financial data types
 
