@@ -7,6 +7,9 @@ import { createBusiness, getUsage } from "../../src/modules/business/business.se
 import { hashPassword } from "../../src/lib/password.js";
 import { createCategory, createMaterial, createWorker, listMaterials } from "../../src/modules/people/people.service.js";
 import { createPurchase } from "../../src/modules/purchases/purchase.service.js";
+import { createSale } from "../../src/modules/sales/sale.service.js";
+import { withTenantContext } from "../../src/db/tenantContext.js";
+import { createAdjustment, getInventory } from "../../src/modules/inventory/inventory.service.js";
 
 async function setContext(
   client: PoolClient,
@@ -201,6 +204,43 @@ test("RLS prevents cross-tenant worker and role permission access", async () => 
   }
 });
 
+test("inventory reports average cost and low-stock state", async () => {
+  const client = await pool.connect();
+  const userId = randomUUID();
+  let businessId: string | undefined;
+  try {
+    await client.query("BEGIN");
+    await setContext(client, userId, null, true);
+    await client.query(
+      `INSERT INTO users (id, name, email, password_hash) VALUES ($1, $2, $3, $4)`,
+      [userId, "Phase 6 Owner", `phase6-${userId}@example.test`, await hashPassword("phase6-password")],
+    );
+    await client.query("COMMIT");
+    businessId = (await createBusiness(userId, { name: `Phase 6 Business ${userId.slice(0, 8)}` })).business.id;
+    await client.query("BEGIN");
+    await setContext(client, userId, null, true);
+    const roleId = (await client.query(
+      "SELECT role_id FROM business_memberships WHERE user_id = $1 AND business_id = $2", [userId, businessId],
+    )).rows[0]!.role_id as string;
+    await client.query("COMMIT");
+    const args = { userId, businessId, roleId };
+    const category = await createCategory(args, "Glass");
+    const material = await createMaterial(args, { categoryId: category.id, name: "Bottle", minimumStock: 10 });
+    await createAdjustment(args, { materialId: material.id, quantity: 6, unit: "KG", unitCost: 12, direction: "IN" });
+    const inventory = await getInventory(args);
+    assert.equal(Number(inventory[0]!.quantity_on_hand), 6);
+    assert.equal(Number(inventory[0]!.average_cost), 12);
+    assert.equal(inventory[0]!.low_stock, true);
+  } finally {
+    await client.query("BEGIN").catch(() => {});
+    await setContext(client, userId, null, true).catch(() => {});
+    if (businessId) await client.query("DELETE FROM businesses WHERE id = $1", [businessId]);
+    await client.query("DELETE FROM users WHERE id = $1", [userId]);
+    await client.query("COMMIT").catch(() => client.query("ROLLBACK"));
+    client.release();
+  }
+});
+
 test("business onboarding seeds tenant foundation and usage", async () => {
   const client = await pool.connect();
   const userId = randomUUID();
@@ -330,11 +370,62 @@ test("purchase creation calculates totals atomically and tracks transactions", a
       discount: 10, taxAmount: 5, paidAmount: 20,
       items: [{ materialId: material.id, quantity: 5, unit: "KG", unitPrice: 25 }],
     });
+
     assert.equal(Number(result.purchase.subtotal), 125);
     assert.equal(Number(result.purchase.total_amount), 120);
     assert.equal(Number(result.purchase.due_amount), 100);
     const usage = await getUsage(userId, businessId, roleId);
     assert.equal(Number(usage.find((row) => row.metric === "transactions")?.value), 1);
+  } finally {
+    await client.query("BEGIN").catch(() => {});
+    await setContext(client, userId, null, true).catch(() => {});
+    if (businessId) await client.query("DELETE FROM businesses WHERE id = $1", [businessId]);
+    await client.query("DELETE FROM users WHERE id = $1", [userId]);
+    await client.query("COMMIT").catch(() => client.query("ROLLBACK"));
+    client.release();
+  }
+});
+
+test("sale creation deducts stock and returns gross profit", async () => {
+  const client = await pool.connect();
+  const userId = randomUUID();
+  let businessId: string | undefined;
+  try {
+    await client.query("BEGIN");
+    await setContext(client, userId, null, true);
+    await client.query(
+      `INSERT INTO users (id, name, email, password_hash) VALUES ($1, $2, $3, $4)`,
+      [userId, "Phase 5 Owner", `phase5-${userId}@example.test`, await hashPassword("phase5-password")],
+    );
+    await client.query("COMMIT");
+    businessId = (await createBusiness(userId, { name: `Phase 5 Business ${userId.slice(0, 8)}` })).business.id;
+    await client.query("BEGIN");
+    await setContext(client, userId, null, true);
+    const roleId = (await client.query(
+      "SELECT role_id FROM business_memberships WHERE user_id = $1 AND business_id = $2", [userId, businessId],
+    )).rows[0]!.role_id as string;
+    await client.query("COMMIT");
+    const args = { userId, businessId, roleId };
+    const category = await createCategory(args, "Plastic");
+    const material = await createMaterial(args, { categoryId: category.id, name: "PET" });
+    const worker = await createWorker(args, { name: "Hari", workerCode: "W-005" });
+    await createPurchase(args, {
+      purchaseNo: `P-${userId.slice(0, 8)}`, workerId: worker.id,
+      items: [{ materialId: material.id, quantity: 10, unit: "KG", unitPrice: 20 }],
+    });
+
+    const sale = await createSale(args, {
+      saleNo: `S-${userId.slice(0, 8)}`,
+      items: [{ materialId: material.id, quantity: 4, unit: "KG", unitPrice: 35 }],
+    });
+
+    assert.equal(Number(sale.cogs), 80);
+    assert.equal(Number(sale.grossProfit), 60);
+    const stock = await withTenantContext(userId, businessId, (tenantClient) => tenantClient.query(
+      "SELECT quantity_on_hand FROM current_stock WHERE business_id = $1 AND material_id = $2",
+      [businessId, material.id],
+    ));
+    assert.equal(Number(stock.rows[0]!.quantity_on_hand), 6);
   } finally {
     await client.query("BEGIN").catch(() => {});
     await setContext(client, userId, null, true).catch(() => {});

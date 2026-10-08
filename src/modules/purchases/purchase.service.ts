@@ -55,6 +55,12 @@ export async function createPurchase(
         [randomUUID(), args.businessId, purchaseId, item.materialId, item.quantity, item.unit, item.unitPrice,
           item.quantity * item.unitPrice, item.notes?.trim() || null],
       );
+      await client.query(
+        `INSERT INTO stock_movements
+         (id, business_id, material_id, movement_type, reference_type, reference_id, quantity_in, unit, unit_cost, created_by)
+         VALUES ($1, $2, $3, 'PURCHASE_IN'::stock_movement_type, 'PURCHASE'::reference_type, $4, $5, $6, $7, $8)`,
+        [randomUUID(), args.businessId, item.materialId, purchaseId, item.quantity, item.unit, item.unitPrice, args.userId],
+      );
     }
     await client.query(
       `INSERT INTO usage_records (business_id, period_start, metric, value)
