@@ -3,6 +3,8 @@ import { test } from "node:test";
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import { pool } from "../../src/db/pool.js";
+import { createBusiness, getUsage } from "../../src/modules/business/business.service.js";
+import { hashPassword } from "../../src/lib/password.js";
 
 async function setContext(
   client: PoolClient,
@@ -194,6 +196,62 @@ test("RLS prevents cross-tenant worker and role permission access", async () => 
     throw error;
   } finally {
     client.release();
-    await pool.end();
   }
+});
+
+test("business onboarding seeds tenant foundation and usage", async () => {
+  const client = await pool.connect();
+  const userId = randomUUID();
+  let businessId: string | undefined;
+  try {
+    await client.query("BEGIN");
+    await setContext(client, userId, null, true);
+    await client.query(
+      `INSERT INTO users (id, name, email, password_hash)
+       VALUES ($1, $2, $3, $4)`,
+      [userId, "Phase 2 Owner", `phase2-${userId}@example.test`, await hashPassword("phase2-password")],
+    );
+    await client.query("COMMIT");
+
+    const result = await createBusiness(userId, { name: `Phase 2 Business ${userId.slice(0, 8)}` });
+    businessId = result.business.id;
+    assert.equal(result.roleName, "Owner");
+    assert.ok(result.accessToken);
+
+    await client.query("BEGIN");
+    await setContext(client, userId, null, true);
+    const seeded = await client.query(
+      `SELECT
+         (SELECT count(*) FROM roles WHERE business_id = $1) AS roles,
+         (SELECT count(*) FROM accounts WHERE business_id = $1) AS accounts,
+         (SELECT status FROM subscriptions WHERE business_id = $1) AS subscription_status`,
+      [businessId],
+    );
+    assert.equal(Number(seeded.rows[0]!.roles), 4);
+    assert.equal(Number(seeded.rows[0]!.accounts), 18);
+    assert.equal(seeded.rows[0]!.subscription_status, "TRIALING");
+    await client.query("COMMIT");
+
+    await client.query("BEGIN");
+    await setContext(client, userId, businessId, false);
+    const usage = await getUsage(userId, businessId, (await client.query(
+      "SELECT role_id FROM business_memberships WHERE user_id = $1 AND business_id = $2",
+      [userId, businessId],
+    )).rows[0]!.role_id);
+    assert.equal(usage.length, 1);
+    assert.equal(usage[0]!.metric, "users");
+    assert.equal(Number(usage[0]!.value), 1);
+    await client.query("COMMIT");
+  } finally {
+    await client.query("BEGIN").catch(() => {});
+    await setContext(client, userId, null, true).catch(() => {});
+    if (businessId) await client.query("DELETE FROM businesses WHERE id = $1", [businessId]);
+    await client.query("DELETE FROM users WHERE id = $1", [userId]);
+    await client.query("COMMIT").catch(() => client.query("ROLLBACK"));
+    client.release();
+  }
+});
+
+test.after(async () => {
+  await pool.end();
 });

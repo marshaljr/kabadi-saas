@@ -22,7 +22,7 @@ command is a no-op for files already recorded.
 | `0008_rls_policies.sql` | Row-Level Security on every tenant table |
 
 Never edit an already-applied migration file. A schema change ships as a
-new numbered file (`0009_...sql`), per the project's change-management
+new numbered file (`0010_...sql`), per the project's change-management
 rule — see the "ARCHITECTURE CHANGE & DATABASE MIGRATION RULE" the product
 owner specified: preserve data, never destructive raw SQL against
 production, always a versioned migration.

@@ -28,7 +28,7 @@ Verified on the project owner's Mac:
 - Temporary `src/types/pg-shim.d.ts` → removed after confirming
   `@types/pg` is installed and typecheck remains clean
 
-## Phase 2 — SaaS Foundation (next phase of feature work)
+## Phase 2 — SaaS Foundation ✅ Complete
 
 Per the phased plan, once the above is done:
 - Business creation / onboarding endpoint: create a `businesses` row,
@@ -43,6 +43,9 @@ Per the phased plan, once the above is done:
   `GET /api/usage` endpoint reading it against the business's plan limits.
 - Platform-admin route group, gated on a `platform_admins` row, using
   `withPlatformAdminContext`.
+
+All Phase 2 items above are implemented and verified. Phase 3 is Materials &
+People.
 
 ## Phases 3-10
 

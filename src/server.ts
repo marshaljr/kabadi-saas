@@ -24,9 +24,16 @@ import {
   login,
   selectActiveBusiness,
   signup,
+  verifyBusinessScopedToken,
   verifyIdentityToken,
 } from "./modules/auth/auth.service.js";
 import { toSafeErrorResponse } from "./lib/httpError.js";
+import {
+  createBusiness,
+  getUsage,
+  listPlans,
+  listPlatformBusinesses,
+} from "./modules/business/business.service.js";
 
 async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
@@ -102,6 +109,55 @@ const routes: Record<string, Record<string, Handler>> = {
       }
       const result = await selectActiveBusiness(payload.sub, businessId);
       sendJson(res, 200, result);
+    },
+  },
+  "/api/auth/switch-business": {
+    POST: async (req, res) => {
+      const token = getBearerToken(req);
+      const payload = verifyIdentityToken(token);
+      const body = await readJsonBody(req);
+      const { businessId } = body as { businessId?: string };
+      if (!businessId) {
+        throw new AuthError("businessId is required", "NOT_A_MEMBER");
+      }
+      const result = await selectActiveBusiness(payload.sub, businessId);
+      sendJson(res, 200, result);
+    },
+  },
+  "/api/businesses": {
+    POST: async (req, res) => {
+      const token = getBearerToken(req);
+      const payload = verifyIdentityToken(token);
+      const body = await readJsonBody(req);
+      const result = await createBusiness(payload.sub, {
+        name: String(body.name ?? ""),
+        address: typeof body.address === "string" ? body.address : undefined,
+        phone: typeof body.phone === "string" ? body.phone : undefined,
+        email: typeof body.email === "string" ? body.email : undefined,
+        planCode: typeof body.planCode === "string" ? body.planCode : undefined,
+      });
+      sendJson(res, 201, result);
+    },
+  },
+  "/api/usage": {
+    GET: async (req, res) => {
+      const token = getBearerToken(req);
+      const payload = verifyBusinessScopedToken(token);
+      const usage = await getUsage(payload.sub, payload.businessId, payload.roleId);
+      sendJson(res, 200, { usage });
+    },
+  },
+  "/api/plans": {
+    GET: async (_req, res) => {
+      sendJson(res, 200, { plans: await listPlans() });
+    },
+  },
+  "/api/platform/businesses": {
+    GET: async (req, res) => {
+      const token = getBearerToken(req);
+      const payload = verifyIdentityToken(token);
+      const businesses = await listPlatformBusinesses(payload.sub);
+      sendJson(res, 200, { businesses });
     },
   },
 };

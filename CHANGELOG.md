@@ -1,5 +1,13 @@
 # Changelog
 
+## Phase 2 — SaaS foundation
+
+- Added atomic business onboarding with default roles and permissions,
+  chart-of-accounts seeding, trial subscriptions, and usage initialization.
+- Added business switching, plan catalog, usage, and platform-admin routes.
+- Added indirect RLS for `subscription_events`.
+- Added PostgreSQL integration coverage for onboarding and usage.
+
 All notable changes to this project are recorded here, newest first.
 
 ## [Phase 1 cleanup]

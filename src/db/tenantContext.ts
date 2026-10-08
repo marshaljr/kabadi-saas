@@ -13,6 +13,10 @@ async function setSessionVar(client: PoolClient, name: string, value: string): P
   await client.query("SELECT set_config($1, $2, true)", [name, value]);
 }
 
+export async function setBusinessContext(client: PoolClient, businessId: string): Promise<void> {
+  await setSessionVar(client, "app.current_business_id", businessId);
+}
+
 async function runInTransaction<T>(
   configure: (client: PoolClient) => Promise<void>,
   fn: (client: PoolClient) => Promise<T>,
@@ -76,6 +80,16 @@ export async function withTenantContext<T>(
  * business_memberships RLS policy note in migration 0008.
  */
 export async function withUserContext<T>(userId: string, fn: (client: PoolClient) => Promise<T>): Promise<T> {
+  return runInTransaction(async (client) => {
+    await setSessionVar(client, "app.current_user_id", userId);
+    await setSessionVar(client, "app.is_platform_admin", "false");
+  }, fn);
+}
+
+export async function withOnboardingContext<T>(
+  userId: string,
+  fn: (client: PoolClient) => Promise<T>,
+): Promise<T> {
   return runInTransaction(async (client) => {
     await setSessionVar(client, "app.current_user_id", userId);
     await setSessionVar(client, "app.is_platform_admin", "false");

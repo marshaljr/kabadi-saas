@@ -1,6 +1,6 @@
 # Development Status
 
-_Last updated: end of Phase 1._
+_Last updated: end of Phase 2._
 
 ## Phase 0 — Analysis ✅ Complete
 Architecture analysis delivered and approved. See `ARCHITECTURE.md` for
@@ -76,8 +76,23 @@ original ERD/schema.
 - Frontend (React/Vite) — no scaffolding created yet
 - A real HTTP framework (Express/Fastify) in place of `node:http`
 
-## Phase 2 — SaaS Foundation — Not started
-See `NEXT_STEPS.md`.
+## Phase 2 — SaaS Foundation ✅ Complete
+
+**Implemented:**
+- Atomic business onboarding with default roles, catalog-driven permissions,
+  owner membership, chart of accounts, trial subscription, and usage seed
+- Business switching without re-login
+- Plan catalog, tenant-scoped usage endpoint, and platform-admin listing
+- Indirect RLS for `subscription_events`
+
+**Verified:**
+- `npm run typecheck` → 0 errors
+- `npm test` → 25 passed, 0 failed, 0 skipped
+- `npm run migrate` → migration `0010` applied and subsequent runs are no-op
+
+## Phase 3 — Materials & People — Next
+Implement permission-protected services and endpoints for categories,
+materials/rates, workers, customers, suppliers, and payment methods.
 
 ## Phases 3-10
 Not started.
