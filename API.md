@@ -87,8 +87,8 @@ raw stack trace or database error (section 68) — see
 ## Not yet implemented
 
 Everything else listed in Master Build Prompt section 54
-(`/api/workers`, `/api/collections`, `/api/purchases`,
+(`/api/collections`,
 `/api/sales`, `/api/payments`, `/api/inventory`, `/api/materials`,
 `/api/reports/*`, `/api/subscription`) is
-Phase 4+ scope. This file will be updated as each lands, per the
+Phase 5+ scope. This file will be updated as each lands, per the
 project's documentation-sync rule.

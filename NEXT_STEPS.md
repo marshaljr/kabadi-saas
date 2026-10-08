@@ -50,7 +50,13 @@ All Phase 2 items above are implemented and verified.
 
 Categories, materials, workers, customers, suppliers, payment methods, and
 worker usage tracking are implemented with permission checks and real RLS
-integration coverage. Phase 4 is Collections & Purchases.
+integration coverage.
+
+## Phase 4 — Collections & Purchases ✅ Complete
+
+Atomic purchase creation/listing, calculation, party validation, transaction
+usage tracking, and real PostgreSQL integration coverage are implemented.
+Phase 5 is Inventory.
 
 ## Phases 3-10
 

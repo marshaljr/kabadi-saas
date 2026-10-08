@@ -38,6 +38,7 @@ import {
   createCategory, createCustomer, createMaterial, createPaymentMethod, createSupplier, createWorker,
   listCategories, listCustomers, listMaterials, listPaymentMethods, listSuppliers, listWorkers,
 } from "./modules/people/people.service.js";
+import { createPurchase, listPurchases } from "./modules/purchases/purchase.service.js";
 
 async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
@@ -226,6 +227,30 @@ const routes: Record<string, Record<string, Handler>> = {
     POST: async (req, res) => {
       const body = await readJsonBody(req);
       sendJson(res, 201, { paymentMethod: await createPaymentMethod(tenantArgs(req), String(body.name ?? ""), body.isCash === true) });
+    },
+  },
+  "/api/purchases": {
+    GET: async (req, res) => sendJson(res, 200, { purchases: await listPurchases(tenantArgs(req)) }),
+    POST: async (req, res) => {
+      const body = await readJsonBody(req);
+      const items = Array.isArray(body.items) ? body.items : [];
+      sendJson(res, 201, { result: await createPurchase(tenantArgs(req), {
+        purchaseNo: String(body.purchaseNo ?? ""),
+        workerId: typeof body.workerId === "string" ? body.workerId : undefined,
+        supplierId: typeof body.supplierId === "string" ? body.supplierId : undefined,
+        date: typeof body.date === "string" ? body.date : undefined,
+        discount: typeof body.discount === "number" ? body.discount : undefined,
+        taxAmount: typeof body.taxAmount === "number" ? body.taxAmount : undefined,
+        paidAmount: typeof body.paidAmount === "number" ? body.paidAmount : undefined,
+        notes: typeof body.notes === "string" ? body.notes : undefined,
+        items: items.map((item) => ({
+          materialId: String((item as Record<string, unknown>).materialId ?? ""),
+          quantity: Number((item as Record<string, unknown>).quantity ?? 0),
+          unit: String((item as Record<string, unknown>).unit ?? "KG"),
+          unitPrice: Number((item as Record<string, unknown>).unitPrice ?? 0),
+          notes: typeof (item as Record<string, unknown>).notes === "string" ? (item as Record<string, unknown>).notes as string : undefined,
+        })),
+      }) });
     },
   },
 };

@@ -1,6 +1,6 @@
 # Development Status
 
-_Last updated: end of Phase 3._
+_Last updated: end of Phase 4._
 
 ## Phase 0 — Analysis ✅ Complete
 Architecture analysis delivered and approved. See `ARCHITECTURE.md` for
@@ -103,9 +103,20 @@ original ERD/schema.
 - `npm run typecheck` → 0 errors
 - `npm test` → 26 passed, 0 failed, 0 skipped
 
-## Phase 4 — Collections & Purchases — Next
-Implement collection intake, purchase headers/items, worker payables, and
-atomic purchase calculation workflows.
+## Phase 4 — Collections & Purchases ✅ Complete
+
+**Implemented:**
+- Atomic permission-protected purchase creation and listing
+- Worker/supplier party validation, item amount calculation, discount/tax,
+  paid/due totals, and posted status
+- Transaction usage tracking and PostgreSQL integration coverage
+
+**Verified:**
+- `npm run typecheck` → 0 errors
+- `npm test` → 27 passed, 0 failed, 0 skipped
+
+## Phase 5 — Inventory — Next
+Implement stock movements, weighted-average costing, and inventory safeguards.
 
 ## Phases 3-10
 Not started.

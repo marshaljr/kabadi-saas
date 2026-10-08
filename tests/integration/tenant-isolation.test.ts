@@ -6,6 +6,7 @@ import { pool } from "../../src/db/pool.js";
 import { createBusiness, getUsage } from "../../src/modules/business/business.service.js";
 import { hashPassword } from "../../src/lib/password.js";
 import { createCategory, createMaterial, createWorker, listMaterials } from "../../src/modules/people/people.service.js";
+import { createPurchase } from "../../src/modules/purchases/purchase.service.js";
 
 async function setContext(
   client: PoolClient,
@@ -289,6 +290,51 @@ test("materials and people services stay tenant-scoped and update worker usage",
     const usage = await getUsage(userId, businessId, owner);
     const workersUsage = usage.find((row) => row.metric === "workers");
     assert.equal(Number(workersUsage?.value), 1);
+  } finally {
+    await client.query("BEGIN").catch(() => {});
+    await setContext(client, userId, null, true).catch(() => {});
+    if (businessId) await client.query("DELETE FROM businesses WHERE id = $1", [businessId]);
+    await client.query("DELETE FROM users WHERE id = $1", [userId]);
+    await client.query("COMMIT").catch(() => client.query("ROLLBACK"));
+    client.release();
+  }
+});
+
+test("purchase creation calculates totals atomically and tracks transactions", async () => {
+  const client = await pool.connect();
+  const userId = randomUUID();
+  let businessId: string | undefined;
+  try {
+    await client.query("BEGIN");
+    await setContext(client, userId, null, true);
+    await client.query(
+      `INSERT INTO users (id, name, email, password_hash)
+       VALUES ($1, $2, $3, $4)`,
+      [userId, "Phase 4 Owner", `phase4-${userId}@example.test`, await hashPassword("phase4-password")],
+    );
+    await client.query("COMMIT");
+    businessId = (await createBusiness(userId, { name: `Phase 4 Business ${userId.slice(0, 8)}` })).business.id;
+    await client.query("BEGIN");
+    await setContext(client, userId, null, true);
+    const roleId = (await client.query(
+      "SELECT role_id FROM business_memberships WHERE user_id = $1 AND business_id = $2",
+      [userId, businessId],
+    )).rows[0]!.role_id as string;
+    await client.query("COMMIT");
+    const args = { userId, businessId, roleId };
+    const category = await createCategory(args, "Paper");
+    const material = await createMaterial(args, { categoryId: category.id, name: "Cardboard" });
+    const worker = await createWorker(args, { name: "Sita", workerCode: "W-004" });
+    const result = await createPurchase(args, {
+      purchaseNo: `P-${userId.slice(0, 8)}`, workerId: worker.id,
+      discount: 10, taxAmount: 5, paidAmount: 20,
+      items: [{ materialId: material.id, quantity: 5, unit: "KG", unitPrice: 25 }],
+    });
+    assert.equal(Number(result.purchase.subtotal), 125);
+    assert.equal(Number(result.purchase.total_amount), 120);
+    assert.equal(Number(result.purchase.due_amount), 100);
+    const usage = await getUsage(userId, businessId, roleId);
+    assert.equal(Number(usage.find((row) => row.metric === "transactions")?.value), 1);
   } finally {
     await client.query("BEGIN").catch(() => {});
     await setContext(client, userId, null, true).catch(() => {});
