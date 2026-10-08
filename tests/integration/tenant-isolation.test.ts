@@ -5,6 +5,7 @@ import type { PoolClient } from "pg";
 import { pool } from "../../src/db/pool.js";
 import { createBusiness, getUsage } from "../../src/modules/business/business.service.js";
 import { hashPassword } from "../../src/lib/password.js";
+import { createCategory, createMaterial, createWorker, listMaterials } from "../../src/modules/people/people.service.js";
 
 async function setContext(
   client: PoolClient,
@@ -254,4 +255,46 @@ test("business onboarding seeds tenant foundation and usage", async () => {
 
 test.after(async () => {
   await pool.end();
+});
+
+test("materials and people services stay tenant-scoped and update worker usage", async () => {
+  const client = await pool.connect();
+  const userId = randomUUID();
+  let businessId: string | undefined;
+  try {
+    await client.query("BEGIN");
+    await setContext(client, userId, null, true);
+    await client.query(
+      `INSERT INTO users (id, name, email, password_hash)
+       VALUES ($1, $2, $3, $4)`,
+      [userId, "Phase 3 Owner", `phase3-${userId}@example.test`, await hashPassword("phase3-password")],
+    );
+    await client.query("COMMIT");
+
+    const onboarding = await createBusiness(userId, { name: `Phase 3 Business ${userId.slice(0, 8)}` });
+    businessId = onboarding.business.id;
+    await client.query("BEGIN");
+    await setContext(client, userId, null, true);
+    const owner = (await client.query(
+      "SELECT role_id FROM business_memberships WHERE user_id = $1 AND business_id = $2",
+      [userId, businessId],
+    )).rows[0]!.role_id as string;
+    await client.query("COMMIT");
+    const args = { userId, businessId, roleId: owner };
+    const category = await createCategory(args, "Metals");
+    await createMaterial(args, { categoryId: category.id, name: "Copper", defaultUnit: "KG" });
+    await createWorker(args, { name: "Ram Kumar", workerCode: "W-001" });
+    assert.equal((await listMaterials(args)).length, 1);
+
+    const usage = await getUsage(userId, businessId, owner);
+    const workersUsage = usage.find((row) => row.metric === "workers");
+    assert.equal(Number(workersUsage?.value), 1);
+  } finally {
+    await client.query("BEGIN").catch(() => {});
+    await setContext(client, userId, null, true).catch(() => {});
+    if (businessId) await client.query("DELETE FROM businesses WHERE id = $1", [businessId]);
+    await client.query("DELETE FROM users WHERE id = $1", [userId]);
+    await client.query("COMMIT").catch(() => client.query("ROLLBACK"));
+    client.release();
+  }
 });

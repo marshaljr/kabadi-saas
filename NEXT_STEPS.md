@@ -44,8 +44,13 @@ Per the phased plan, once the above is done:
 - Platform-admin route group, gated on a `platform_admins` row, using
   `withPlatformAdminContext`.
 
-All Phase 2 items above are implemented and verified. Phase 3 is Materials &
-People.
+All Phase 2 items above are implemented and verified.
+
+## Phase 3 — Materials & People ✅ Complete
+
+Categories, materials, workers, customers, suppliers, payment methods, and
+worker usage tracking are implemented with permission checks and real RLS
+integration coverage. Phase 4 is Collections & Purchases.
 
 ## Phases 3-10
 

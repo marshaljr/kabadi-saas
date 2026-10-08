@@ -34,6 +34,10 @@ import {
   listPlans,
   listPlatformBusinesses,
 } from "./modules/business/business.service.js";
+import {
+  createCategory, createCustomer, createMaterial, createPaymentMethod, createSupplier, createWorker,
+  listCategories, listCustomers, listMaterials, listPaymentMethods, listSuppliers, listWorkers,
+} from "./modules/people/people.service.js";
 
 async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
@@ -53,7 +57,13 @@ function getBearerToken(req: IncomingMessage): string {
   if (!header || !header.startsWith("Bearer ")) {
     throw new AuthError("Missing or malformed Authorization header", "INVALID_CREDENTIALS");
   }
+
   return header.slice("Bearer ".length);
+}
+
+function tenantArgs(req: IncomingMessage) {
+  const payload = verifyBusinessScopedToken(getBearerToken(req));
+  return { userId: payload.sub, businessId: payload.businessId, roleId: payload.roleId };
 }
 
 function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
@@ -158,6 +168,64 @@ const routes: Record<string, Record<string, Handler>> = {
       const payload = verifyIdentityToken(token);
       const businesses = await listPlatformBusinesses(payload.sub);
       sendJson(res, 200, { businesses });
+    },
+  },
+  "/api/categories": {
+    GET: async (req, res) => sendJson(res, 200, { categories: await listCategories(tenantArgs(req)) }),
+    POST: async (req, res) => {
+      const body = await readJsonBody(req);
+      sendJson(res, 201, { category: await createCategory(tenantArgs(req), String(body.name ?? ""), typeof body.description === "string" ? body.description : undefined) });
+    },
+  },
+  "/api/materials": {
+    GET: async (req, res) => sendJson(res, 200, { materials: await listMaterials(tenantArgs(req)) }),
+    POST: async (req, res) => {
+      const body = await readJsonBody(req);
+      sendJson(res, 201, { material: await createMaterial(tenantArgs(req), {
+        categoryId: String(body.categoryId ?? ""), name: String(body.name ?? ""),
+        sku: typeof body.sku === "string" ? body.sku : undefined,
+        defaultUnit: typeof body.defaultUnit === "string" ? body.defaultUnit : undefined,
+        minimumStock: typeof body.minimumStock === "number" ? body.minimumStock : undefined,
+        notes: typeof body.notes === "string" ? body.notes : undefined,
+      }) });
+    },
+  },
+  "/api/workers": {
+    GET: async (req, res) => sendJson(res, 200, { workers: await listWorkers(tenantArgs(req)) }),
+    POST: async (req, res) => {
+      const body = await readJsonBody(req);
+      sendJson(res, 201, { worker: await createWorker(tenantArgs(req), {
+        name: String(body.name ?? ""), workerCode: typeof body.workerCode === "string" ? body.workerCode : undefined,
+        phone: typeof body.phone === "string" ? body.phone : undefined, address: typeof body.address === "string" ? body.address : undefined,
+        joiningDate: typeof body.joiningDate === "string" ? body.joiningDate : undefined, notes: typeof body.notes === "string" ? body.notes : undefined,
+      }) });
+    },
+  },
+  "/api/customers": {
+    GET: async (req, res) => sendJson(res, 200, { customers: await listCustomers(tenantArgs(req)) }),
+    POST: async (req, res) => {
+      const body = await readJsonBody(req);
+      sendJson(res, 201, { customer: await createCustomer(tenantArgs(req), {
+        name: String(body.name ?? ""), customerCode: typeof body.customerCode === "string" ? body.customerCode : undefined,
+        phone: typeof body.phone === "string" ? body.phone : undefined, address: typeof body.address === "string" ? body.address : undefined,
+      }) });
+    },
+  },
+  "/api/suppliers": {
+    GET: async (req, res) => sendJson(res, 200, { suppliers: await listSuppliers(tenantArgs(req)) }),
+    POST: async (req, res) => {
+      const body = await readJsonBody(req);
+      sendJson(res, 201, { supplier: await createSupplier(tenantArgs(req), {
+        name: String(body.name ?? ""), supplierCode: typeof body.supplierCode === "string" ? body.supplierCode : undefined,
+        phone: typeof body.phone === "string" ? body.phone : undefined, address: typeof body.address === "string" ? body.address : undefined,
+      }) });
+    },
+  },
+  "/api/payment-methods": {
+    GET: async (req, res) => sendJson(res, 200, { paymentMethods: await listPaymentMethods(tenantArgs(req)) }),
+    POST: async (req, res) => {
+      const body = await readJsonBody(req);
+      sendJson(res, 201, { paymentMethod: await createPaymentMethod(tenantArgs(req), String(body.name ?? ""), body.isCash === true) });
     },
   },
 };

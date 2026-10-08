@@ -1,6 +1,6 @@
 # Development Status
 
-_Last updated: end of Phase 2._
+_Last updated: end of Phase 3._
 
 ## Phase 0 — Analysis ✅ Complete
 Architecture analysis delivered and approved. See `ARCHITECTURE.md` for
@@ -90,9 +90,22 @@ original ERD/schema.
 - `npm test` → 25 passed, 0 failed, 0 skipped
 - `npm run migrate` → migration `0010` applied and subsequent runs are no-op
 
-## Phase 3 — Materials & People — Next
-Implement permission-protected services and endpoints for categories,
-materials/rates, workers, customers, suppliers, and payment methods.
+## Phase 3 — Materials & People ✅ Complete
+
+**Implemented:**
+- Permission-protected tenant services and routes for categories, materials,
+  workers, customers, suppliers, and payment methods
+- Worker usage tracking in the current billing period
+- RLS-backed integration coverage for category/material/worker creation and
+  tenant-scoped reads
+
+**Verified:**
+- `npm run typecheck` → 0 errors
+- `npm test` → 26 passed, 0 failed, 0 skipped
+
+## Phase 4 — Collections & Purchases — Next
+Implement collection intake, purchase headers/items, worker payables, and
+atomic purchase calculation workflows.
 
 ## Phases 3-10
 Not started.

@@ -90,5 +90,5 @@ Everything else listed in Master Build Prompt section 54
 (`/api/workers`, `/api/collections`, `/api/purchases`,
 `/api/sales`, `/api/payments`, `/api/inventory`, `/api/materials`,
 `/api/reports/*`, `/api/subscription`) is
-Phase 3+ scope. This file will be updated as each lands, per the
+Phase 4+ scope. This file will be updated as each lands, per the
 project's documentation-sync rule.
