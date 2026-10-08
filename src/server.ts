@@ -41,6 +41,9 @@ import {
 import { createPurchase, listPurchases } from "./modules/purchases/purchase.service.js";
 import { createSale, listSales } from "./modules/sales/sale.service.js";
 import { createAdjustment, getInventory } from "./modules/inventory/inventory.service.js";
+import { createExpense, getLedger, getTrialBalance } from "./modules/accounting/accounting.service.js";
+import { getDashboard } from "./modules/reports/reports.service.js";
+import { getSubscription } from "./modules/billing/billing.service.js";
 
 async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
@@ -286,6 +289,27 @@ const routes: Record<string, Record<string, Handler>> = {
         notes: typeof body.notes === "string" ? body.notes : undefined,
       }) });
     },
+  },
+  "/api/accounting/ledger": {
+    GET: async (req, res) => sendJson(res, 200, { ledger: await getLedger(tenantArgs(req)) }),
+  },
+  "/api/accounting/trial-balance": {
+    GET: async (req, res) => sendJson(res, 200, { accounts: await getTrialBalance(tenantArgs(req)) }),
+  },
+  "/api/accounting/expenses": {
+    POST: async (req, res) => {
+      const body = await readJsonBody(req);
+      sendJson(res, 201, { expense: await createExpense(tenantArgs(req), {
+        expenseNo: String(body.expenseNo ?? ""), expenseCategoryId: String(body.expenseCategoryId ?? ""),
+        amount: Number(body.amount ?? 0), description: String(body.description ?? ""),
+      }) });
+    },
+  },
+  "/api/reports/dashboard": {
+    GET: async (req, res) => sendJson(res, 200, { dashboard: await getDashboard(tenantArgs(req)) }),
+  },
+  "/api/billing/subscription": {
+    GET: async (req, res) => sendJson(res, 200, { subscription: await getSubscription(tenantArgs(req)) }),
   },
 };
 
