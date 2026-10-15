@@ -10,6 +10,9 @@ import { createPurchase } from "../../src/modules/purchases/purchase.service.js"
 import { createSale } from "../../src/modules/sales/sale.service.js";
 import { withTenantContext } from "../../src/db/tenantContext.js";
 import { createAdjustment, getInventory } from "../../src/modules/inventory/inventory.service.js";
+import { server } from "../../src/server.js";
+import { signJwt } from "../../src/lib/jwt.js";
+import { env } from "../../src/config/env.js";
 
 async function setContext(
   client: PoolClient,
@@ -231,6 +234,84 @@ test("inventory reports average cost and low-stock state", async () => {
     assert.equal(Number(inventory[0]!.quantity_on_hand), 6);
     assert.equal(Number(inventory[0]!.average_cost), 12);
     assert.equal(inventory[0]!.low_stock, true);
+  } finally {
+    await client.query("BEGIN").catch(() => {});
+    await setContext(client, userId, null, true).catch(() => {});
+    if (businessId) await client.query("DELETE FROM businesses WHERE id = $1", [businessId]);
+    await client.query("DELETE FROM users WHERE id = $1", [userId]);
+    await client.query("COMMIT").catch(() => client.query("ROLLBACK"));
+    client.release();
+  }
+});
+
+test("inventory adjustments validate inputs, preserve stock, and enforce permissions", async () => {
+  const client = await pool.connect();
+  const userId = randomUUID();
+  let businessId: string | undefined;
+  try {
+    await client.query("BEGIN");
+    await setContext(client, userId, null, true);
+    await client.query(
+      `INSERT INTO users (id, name, email, password_hash) VALUES ($1, $2, $3, $4)`,
+      [userId, "Phase 6 Validation", `phase6-validation-${userId}@example.test`, await hashPassword("phase6-password")],
+    );
+    await client.query("COMMIT");
+    businessId = (await createBusiness(userId, { name: `Phase 6 Validation ${userId.slice(0, 8)}` })).business.id;
+    await client.query("BEGIN");
+    await setContext(client, userId, null, true);
+    const roleId = (await client.query(
+      "SELECT role_id FROM business_memberships WHERE user_id = $1 AND business_id = $2", [userId, businessId],
+    )).rows[0]!.role_id as string;
+    await client.query("COMMIT");
+    const args = { userId, businessId, roleId };
+    const category = await createCategory(args, "Validation");
+    const material = await createMaterial(args, { categoryId: category.id, name: "Copper" });
+    await createAdjustment(args, { materialId: material.id, quantity: 5, unit: "KG", unitCost: 10, direction: "IN" });
+    await createAdjustment(args, { materialId: material.id, quantity: 2, unit: "KG", unitCost: 10, direction: "OUT" });
+    const concurrentResults = await Promise.allSettled([
+      createAdjustment(args, { materialId: material.id, quantity: 2, unit: "KG", unitCost: 10, direction: "OUT" }),
+      createAdjustment(args, { materialId: material.id, quantity: 2, unit: "KG", unitCost: 10, direction: "OUT" }),
+    ]);
+    assert.equal(concurrentResults.filter((result) => result.status === "fulfilled").length, 1);
+    await assert.rejects(
+      () => createAdjustment(args, { materialId: material.id, quantity: 2, unit: "KG", unitCost: 10, direction: "OUT" }),
+      (error: { publicCode?: string; statusCode?: number }) => error.publicCode === "INSUFFICIENT_STOCK" && error.statusCode === 409,
+    );
+    await assert.rejects(
+      () => createAdjustment({ ...args, roleId: randomUUID() }, { materialId: material.id, quantity: 1, unit: "KG", unitCost: 10, direction: "IN" }),
+      (error: { name?: string }) => error.name === "ForbiddenError",
+    );
+    for (const input of [
+      { materialId: material.id, quantity: Number.NaN, unit: "KG", unitCost: 1, direction: "IN" },
+      { materialId: material.id, quantity: 1, unit: "KG", unitCost: Number.POSITIVE_INFINITY, direction: "IN" },
+      { materialId: material.id, quantity: 1, unit: "LITRE", unitCost: 1, direction: "IN" },
+      { materialId: material.id, quantity: 1, unit: "KG", unitCost: 1, direction: "SIDEWAYS" },
+      { materialId: "not-a-uuid", quantity: 1, unit: "KG", unitCost: 1, direction: "IN" },
+    ]) {
+      await assert.rejects(() => createAdjustment(args, input), (error: { statusCode?: number }) => error.statusCode === 400);
+    }
+    const movementCount = await withTenantContext(userId, businessId, (tenantClient) => tenantClient.query(
+      "SELECT COUNT(*)::int AS count FROM stock_movements WHERE business_id = $1 AND material_id = $2",
+      [businessId, material.id],
+    ));
+    assert.equal(movementCount.rows[0]!.count, 3);
+
+    const listener = await new Promise<ReturnType<typeof server.listen>>((resolve) => {
+      const active = server.listen(0, () => resolve(active));
+    });
+    try {
+      const token = signJwt({ sub: userId, businessId, roleId }, env.jwtSecret, 3600);
+      const response = await fetch(`http://127.0.0.1:${(listener.address() as { port: number }).port}/api/inventory`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ materialId: material.id, quantity: 1, unit: "KG", unitCost: 10, direction: "SIDEWAYS" }),
+      });
+      assert.equal(response.status, 400);
+      const responseBody = await response.json() as { code?: string };
+      assert.equal(responseBody.code, "INVALID_DIRECTION");
+    } finally {
+      await new Promise<void>((resolve, reject) => listener.close((error) => error ? reject(error) : resolve()));
+    }
   } finally {
     await client.query("BEGIN").catch(() => {});
     await setContext(client, userId, null, true).catch(() => {});

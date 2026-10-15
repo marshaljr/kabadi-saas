@@ -18,6 +18,7 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { env } from "./config/env.js";
+import { HttpError, toSafeErrorResponse } from "./lib/httpError.js";
 import {
   AuthError,
   listMyBusinesses,
@@ -27,7 +28,6 @@ import {
   verifyBusinessScopedToken,
   verifyIdentityToken,
 } from "./modules/auth/auth.service.js";
-import { toSafeErrorResponse } from "./lib/httpError.js";
 import {
   createBusiness,
   getUsage,
@@ -54,7 +54,7 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
   try {
     return JSON.parse(Buffer.concat(chunks).toString("utf8"));
   } catch {
-    throw new Error("Request body must be valid JSON");
+    throw new HttpError(400, "Request body must be valid JSON", "INVALID_JSON");
   }
 }
 
@@ -282,10 +282,13 @@ const routes: Record<string, Record<string, Handler>> = {
     GET: async (req, res) => sendJson(res, 200, { inventory: await getInventory(tenantArgs(req)) }),
     POST: async (req, res) => {
       const body = await readJsonBody(req);
+      const direction = body.direction;
       sendJson(res, 201, { movement: await createAdjustment(tenantArgs(req), {
-        materialId: String(body.materialId ?? ""), quantity: Number(body.quantity ?? 0),
-        unit: String(body.unit ?? "KG"), unitCost: Number(body.unitCost ?? 0),
-        direction: body.direction === "OUT" ? "OUT" : "IN",
+        materialId: typeof body.materialId === "string" ? body.materialId : "",
+        quantity: typeof body.quantity === "number" ? body.quantity : Number.NaN,
+        unit: typeof body.unit === "string" ? body.unit : "",
+        unitCost: typeof body.unitCost === "number" ? body.unitCost : Number.NaN,
+        direction: typeof direction === "string" ? direction : "",
         notes: typeof body.notes === "string" ? body.notes : undefined,
       }) });
     },
