@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { withTenantContext } from "../../db/tenantContext.js";
 import { requirePermission } from "../../middleware/authorize.js";
+import { getSystemAccountId, insertJournalEntry } from "../accounting/accounting.service.js";
 
 export interface PurchaseItemInput {
   materialId: string;
@@ -69,6 +70,27 @@ export async function createPurchase(
        DO UPDATE SET value = usage_records.value + 1, updated_at = now()`,
       [args.businessId],
     );
+    const inventoryAccount = await getSystemAccountId(client, args.businessId, "1200");
+    const cashAccount = await getSystemAccountId(client, args.businessId, "1000");
+    const payableAccount = await getSystemAccountId(client, args.businessId, input.workerId ? "2000" : "2010");
+    const paymentLines = paidAmount > 0
+      ? [{ accountId: cashAccount, debit: 0, credit: paidAmount }]
+      : [];
+    const payableLines = totalAmount - paidAmount > 0
+      ? [{ accountId: payableAccount, debit: 0, credit: totalAmount - paidAmount }]
+      : [];
+    await insertJournalEntry(client, args.businessId, args.userId, {
+      entryNo: `PUR-${purchaseId}`,
+      date: input.date,
+      referenceType: "PURCHASE",
+      referenceId: purchaseId,
+      description: `Purchase ${input.purchaseNo.trim()}`,
+      lines: [
+        { accountId: inventoryAccount, debit: totalAmount, credit: 0 },
+        ...paymentLines,
+        ...payableLines,
+      ],
+    });
     return { purchase: header.rows[0], items: input.items };
   });
 }

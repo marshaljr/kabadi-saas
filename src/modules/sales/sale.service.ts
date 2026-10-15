@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { withTenantContext } from "../../db/tenantContext.js";
 import { requirePermission } from "../../middleware/authorize.js";
+import { getSystemAccountId, insertJournalEntry } from "../accounting/accounting.service.js";
 
 export interface SaleItemInput {
   materialId: string;
@@ -70,6 +71,28 @@ export async function createSale(
       [args.businessId],
     );
     const cogs = costing.reduce((sum, item) => sum + item.cogs, 0);
+    const cashAccount = await getSystemAccountId(client, args.businessId, "1000");
+    const receivableAccount = await getSystemAccountId(client, args.businessId, "1100");
+    const revenueAccount = await getSystemAccountId(client, args.businessId, "4000");
+    const cogsAccount = await getSystemAccountId(client, args.businessId, "5000");
+    const inventoryAccount = await getSystemAccountId(client, args.businessId, "1200");
+    const saleLines = [
+      ...(paidAmount > 0 ? [{ accountId: cashAccount, debit: paidAmount, credit: 0 }] : []),
+      ...(totalAmount - paidAmount > 0 ? [{ accountId: receivableAccount, debit: totalAmount - paidAmount, credit: 0 }] : []),
+      { accountId: revenueAccount, debit: 0, credit: totalAmount },
+      ...(cogs > 0 ? [
+        { accountId: cogsAccount, debit: cogs, credit: 0 },
+        { accountId: inventoryAccount, debit: 0, credit: cogs },
+      ] : []),
+    ];
+    await insertJournalEntry(client, args.businessId, args.userId, {
+      entryNo: `SAL-${saleId}`,
+      date: input.date,
+      referenceType: "SALE",
+      referenceId: saleId,
+      description: `Sale ${input.saleNo.trim()}`,
+      lines: saleLines,
+    });
     return { sale: sale.rows[0], grossProfit: totalAmount - cogs, cogs };
   });
 }

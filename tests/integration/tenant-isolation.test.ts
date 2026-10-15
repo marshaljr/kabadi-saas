@@ -10,6 +10,7 @@ import { createPurchase } from "../../src/modules/purchases/purchase.service.js"
 import { createSale } from "../../src/modules/sales/sale.service.js";
 import { withTenantContext } from "../../src/db/tenantContext.js";
 import { createAdjustment, getInventory } from "../../src/modules/inventory/inventory.service.js";
+import { createExpense, createIncome, createJournalEntry, getLedger, getTrialBalance } from "../../src/modules/accounting/accounting.service.js";
 import { server } from "../../src/server.js";
 import { signJwt } from "../../src/lib/jwt.js";
 import { env } from "../../src/config/env.js";
@@ -207,6 +208,126 @@ test("RLS prevents cross-tenant worker and role permission access", async () => 
   }
 });
 
+test("accounting journals stay balanced, tenant-scoped, and atomic", async () => {
+  const client = await pool.connect();
+  const userId = randomUUID();
+  let businessId: string | undefined;
+  let otherBusinessId: string | undefined;
+  try {
+    await client.query("BEGIN");
+    await setContext(client, userId, null, true);
+    await client.query(
+      `INSERT INTO users (id, name, email, password_hash) VALUES ($1, $2, $3, $4)`,
+      [userId, "Accounting Owner", `accounting-${userId}@example.test`, await hashPassword("accounting-password")],
+    );
+    await client.query("COMMIT");
+    businessId = (await createBusiness(userId, { name: `Accounting ${userId.slice(0, 8)}` })).business.id;
+    otherBusinessId = (await createBusiness(userId, { name: `Other Accounting ${userId.slice(0, 8)}` })).business.id;
+    await client.query("BEGIN");
+    await setContext(client, userId, null, true);
+    const roleId = (await client.query(
+      "SELECT role_id FROM business_memberships WHERE user_id = $1 AND business_id = $2", [userId, businessId],
+    )).rows[0]!.role_id as string;
+    const accounts = (await client.query(
+      "SELECT id, account_code FROM accounts WHERE business_id = $1 AND account_code IN ('1000', '4000', '6000') ORDER BY account_code",
+      [businessId],
+    )).rows as Array<{ id: string; account_code: string }>;
+    const cash = accounts.find((account) => account.account_code === "1000")!.id;
+    const revenue = accounts.find((account) => account.account_code === "4000")!.id;
+    const expenseAccount = accounts.find((account) => account.account_code === "6000")!.id;
+    await client.query("COMMIT");
+    const otherAccount = await withTenantContext(userId, otherBusinessId, (tenantClient) => tenantClient.query(
+      "SELECT id FROM accounts WHERE business_id = $1 AND account_code = '1000'", [otherBusinessId],
+    ));
+    await client.query("BEGIN");
+    await setContext(client, userId, null, true);
+    await client.query("INSERT INTO expense_categories (business_id, name) VALUES ($1, $2)", [businessId, "Utilities"]);
+    const categoryId = (await client.query(
+      "SELECT id FROM expense_categories WHERE business_id = $1 AND name = 'Utilities'", [businessId],
+    )).rows[0]!.id as string;
+    await client.query("COMMIT");
+
+    const args = { userId, businessId, roleId };
+    const balanced = await createJournalEntry(args, {
+      entryNo: "JE-001", description: "Initial balanced entry",
+      lines: [{ accountId: cash, debit: 100, credit: 0 }, { accountId: revenue, debit: 0, credit: 100 }],
+    });
+    assert.equal(balanced.lines.length, 2);
+    await assert.rejects(
+      () => createJournalEntry(args, {
+        entryNo: "JE-UNBALANCED", lines: [{ accountId: cash, debit: 100, credit: 0 }, { accountId: revenue, debit: 0, credit: 90 }],
+      }),
+      (error: { publicCode?: string }) => error.publicCode === "UNBALANCED_JOURNAL",
+    );
+    await assert.rejects(
+      () => createJournalEntry(args, { entryNo: "JE-MISSING-LINE", lines: [{ accountId: cash, debit: 1, credit: 0 }] }),
+      (error: { publicCode?: string }) => error.publicCode === "INVALID_JOURNAL_LINES",
+    );
+    await assert.rejects(
+      () => createJournalEntry(args, {
+        entryNo: "JE-INVALID-AMOUNT", lines: [
+          { accountId: cash, debit: Number.NaN, credit: 0 },
+          { accountId: revenue, debit: 0, credit: 1 },
+        ],
+      }),
+      (error: { publicCode?: string }) => error.publicCode === "INVALID_AMOUNT",
+    );
+    await assert.rejects(
+      () => createJournalEntry(args, {
+        entryNo: "JE-BOTH-SIDES", lines: [
+          { accountId: cash, debit: 1, credit: 1 },
+          { accountId: revenue, debit: 0, credit: 2 },
+        ],
+      }),
+      (error: { publicCode?: string }) => error.publicCode === "INVALID_JOURNAL_LINE",
+    );
+    await assert.rejects(
+      () => createJournalEntry(args, {
+        entryNo: "JE-INVALID", lines: [{ accountId: randomUUID(), debit: 1, credit: 0 }, { accountId: revenue, debit: 0, credit: 1 }],
+      }),
+      (error: { publicCode?: string }) => error.publicCode === "INVALID_ACCOUNT",
+    );
+    await assert.rejects(
+      () => createJournalEntry(args, {
+        entryNo: "JE-CROSS-TENANT", lines: [{ accountId: otherAccount.rows[0]!.id, debit: 1, credit: 0 }, { accountId: revenue, debit: 0, credit: 1 }],
+      }),
+      (error: { publicCode?: string }) => error.publicCode === "INVALID_ACCOUNT",
+    );
+    const income = await createIncome(args, {
+      entryNo: "INC-001", amount: 50, debitAccountId: cash, incomeAccountId: revenue, description: "Scrap consulting",
+    });
+    assert.equal(income.lines.length, 2);
+    const expense = await createExpense(args, {
+      expenseNo: "EXP-001", expenseCategoryId: categoryId, amount: 25, description: "Power",
+      debitAccountId: expenseAccount, creditAccountId: cash,
+    });
+    assert.equal(expense.journal.lines.length, 2);
+    const ledger = await getLedger(args);
+    assert.equal(ledger.length, 6);
+    const trialBalance = await getTrialBalance(args);
+    assert.equal(trialBalance.reduce((sum, row) => sum + Number(row.debit), 0), trialBalance.reduce((sum, row) => sum + Number(row.credit), 0));
+    const failedEntry = await withTenantContext(userId, businessId, (tenantClient) => tenantClient.query(
+      "SELECT COUNT(*)::int AS count FROM journal_entries WHERE business_id = $1 AND entry_no IN ('JE-UNBALANCED', 'JE-MISSING-LINE', 'JE-INVALID', 'JE-CROSS-TENANT')",
+      [businessId],
+    ));
+    assert.equal(failedEntry.rows[0]!.count, 0);
+    await assert.rejects(
+      () => createJournalEntry({ ...args, roleId: randomUUID() }, {
+        entryNo: "JE-FORBIDDEN", lines: [{ accountId: cash, debit: 1, credit: 0 }, { accountId: revenue, debit: 0, credit: 1 }],
+      }),
+      (error: { name?: string }) => error.name === "ForbiddenError",
+    );
+  } finally {
+    await client.query("BEGIN").catch(() => {});
+    await setContext(client, userId, null, true).catch(() => {});
+    if (businessId) await client.query("DELETE FROM businesses WHERE id = $1", [businessId]);
+    if (otherBusinessId) await client.query("DELETE FROM businesses WHERE id = $1", [otherBusinessId]);
+    await client.query("DELETE FROM users WHERE id = $1", [userId]);
+    await client.query("COMMIT").catch(() => client.query("ROLLBACK"));
+    client.release();
+  }
+});
+
 test("inventory reports average cost and low-stock state", async () => {
   const client = await pool.connect();
   const userId = randomUUID();
@@ -299,6 +420,7 @@ test("inventory adjustments validate inputs, preserve stock, and enforce permiss
     const listener = await new Promise<ReturnType<typeof server.listen>>((resolve) => {
       const active = server.listen(0, () => resolve(active));
     });
+
     try {
       const token = signJwt({ sub: userId, businessId, roleId }, env.jwtSecret, 3600);
       const response = await fetch(`http://127.0.0.1:${(listener.address() as { port: number }).port}/api/inventory`, {

@@ -41,7 +41,7 @@ import {
 import { createPurchase, listPurchases } from "./modules/purchases/purchase.service.js";
 import { createSale, listSales } from "./modules/sales/sale.service.js";
 import { createAdjustment, getInventory } from "./modules/inventory/inventory.service.js";
-import { createExpense, getLedger, getTrialBalance } from "./modules/accounting/accounting.service.js";
+import { createExpense, createIncome, createJournalEntry, getLedger, getTrialBalance } from "./modules/accounting/accounting.service.js";
 import { getDashboard } from "./modules/reports/reports.service.js";
 import { getSubscription } from "./modules/billing/billing.service.js";
 
@@ -296,6 +296,41 @@ const routes: Record<string, Record<string, Handler>> = {
   "/api/accounting/ledger": {
     GET: async (req, res) => sendJson(res, 200, { ledger: await getLedger(tenantArgs(req)) }),
   },
+  "/api/accounting/journal-entries": {
+    POST: async (req, res) => {
+      const body = await readJsonBody(req);
+      const rawLines = Array.isArray(body.lines) ? body.lines : [];
+      sendJson(res, 201, { journal: await createJournalEntry(tenantArgs(req), {
+        entryNo: typeof body.entryNo === "string" ? body.entryNo : "",
+        date: typeof body.date === "string" ? body.date : undefined,
+        referenceType: typeof body.referenceType === "string" ? body.referenceType : undefined,
+        referenceId: typeof body.referenceId === "string" ? body.referenceId : undefined,
+        description: typeof body.description === "string" ? body.description : undefined,
+        lines: rawLines.map((rawLine) => {
+          const line = rawLine as Record<string, unknown>;
+          return {
+            accountId: typeof line.accountId === "string" ? line.accountId : "",
+            debit: typeof line.debit === "number" ? line.debit : Number.NaN,
+            credit: typeof line.credit === "number" ? line.credit : Number.NaN,
+            description: typeof line.description === "string" ? line.description : undefined,
+          };
+        }),
+      }) });
+    },
+  },
+  "/api/accounting/income": {
+    POST: async (req, res) => {
+      const body = await readJsonBody(req);
+      sendJson(res, 201, { journal: await createIncome(tenantArgs(req), {
+        entryNo: typeof body.entryNo === "string" ? body.entryNo : "",
+        amount: typeof body.amount === "number" ? body.amount : Number.NaN,
+        debitAccountId: typeof body.debitAccountId === "string" ? body.debitAccountId : "",
+        incomeAccountId: typeof body.incomeAccountId === "string" ? body.incomeAccountId : "",
+        description: typeof body.description === "string" ? body.description : "",
+        date: typeof body.date === "string" ? body.date : undefined,
+      }) });
+    },
+  },
   "/api/accounting/trial-balance": {
     GET: async (req, res) => sendJson(res, 200, { accounts: await getTrialBalance(tenantArgs(req)) }),
   },
@@ -304,7 +339,11 @@ const routes: Record<string, Record<string, Handler>> = {
       const body = await readJsonBody(req);
       sendJson(res, 201, { expense: await createExpense(tenantArgs(req), {
         expenseNo: String(body.expenseNo ?? ""), expenseCategoryId: String(body.expenseCategoryId ?? ""),
-        amount: Number(body.amount ?? 0), description: String(body.description ?? ""),
+        amount: typeof body.amount === "number" ? body.amount : Number.NaN,
+        description: typeof body.description === "string" ? body.description : "",
+        debitAccountId: typeof body.debitAccountId === "string" ? body.debitAccountId : "",
+        creditAccountId: typeof body.creditAccountId === "string" ? body.creditAccountId : "",
+        date: typeof body.date === "string" ? body.date : undefined,
       }) });
     },
   },

@@ -1,8 +1,7 @@
 # API
 
-Phase 2 adds SaaS onboarding, plan visibility, usage, and platform-admin
-foundation. The operational API surface (workers, purchases, sales,
-inventory, reports, etc.) lands progressively in Phases 3-8.
+The API includes SaaS onboarding, tenant-scoped operations, inventory,
+accounting, reports, and billing foundation endpoints.
 
 ## Auth endpoints (implemented)
 
@@ -78,17 +77,55 @@ user has a row in `platform_admins`; ordinary users receive `403`.
 ### `GET /health`
 → `200` `{ "status": "ok" }`
 
+## Accounting endpoints
+
+All accounting endpoints require a business-scoped bearer token.
+
+### `POST /api/accounting/journal-entries`
+
+Creates an atomic, posted double-entry journal entry. It requires at least
+two lines, tenant-owned active accounts, exactly one positive debit or credit
+per line, and equal positive totals.
+
+```json
+{
+  "entryNo": "JE-001",
+  "description": "Cash received",
+  "lines": [
+    { "accountId": "<cash-account>", "debit": 100, "credit": 0 },
+    { "accountId": "<revenue-account>", "debit": 0, "credit": 100 }
+  ]
+}
+```
+
+### `POST /api/accounting/income`
+
+Records non-sales income as a journal entry without changing sales or stock.
+The request supplies the debit account, income account, amount, and entry
+number.
+
+### `POST /api/accounting/expenses`
+
+Creates a posted operating expense and its balanced journal entry atomically.
+The request supplies an existing expense category, debit expense account,
+credit payment/liability account, amount, and expense number.
+
+### `GET /api/accounting/ledger`
+
+Returns posted journal lines for the authenticated business.
+
+### `GET /api/accounting/trial-balance`
+
+Returns posted debit and credit totals aggregated per account.
+
 ## Error shape
 
 Every error response is `{ "error": "human-readable message" }`, never a
 raw stack trace or database error (section 68) — see
 `src/lib/httpError.ts`.
 
-## Not yet implemented
+## Related operational endpoints
 
-Everything else listed in Master Build Prompt section 54
-(`/api/collections`,
-`/api/sales`, `/api/payments`, `/api/inventory`, `/api/materials`,
-`/api/reports/*`, `/api/subscription`) is
-Phase 5+ scope. This file will be updated as each lands, per the
-project's documentation-sync rule.
+Implemented tenant-scoped endpoints include `/api/materials`, `/api/purchases`,
+`/api/sales`, `/api/inventory`, `/api/reports/dashboard`, and
+`/api/billing/subscription`.
