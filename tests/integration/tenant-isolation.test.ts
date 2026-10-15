@@ -11,6 +11,7 @@ import { createSale } from "../../src/modules/sales/sale.service.js";
 import { withTenantContext } from "../../src/db/tenantContext.js";
 import { createAdjustment, getInventory } from "../../src/modules/inventory/inventory.service.js";
 import { createExpense, createIncome, createJournalEntry, getLedger, getTrialBalance } from "../../src/modules/accounting/accounting.service.js";
+import { getDashboard, getProfitAndLoss } from "../../src/modules/reports/reports.service.js";
 import { server } from "../../src/server.js";
 import { signJwt } from "../../src/lib/jwt.js";
 import { env } from "../../src/config/env.js";
@@ -252,6 +253,102 @@ test("accounting journals stay balanced, tenant-scoped, and atomic", async () =>
       entryNo: "JE-001", description: "Initial balanced entry",
       lines: [{ accountId: cash, debit: 100, credit: 0 }, { accountId: revenue, debit: 0, credit: 100 }],
     });
+
+    await (async () => {
+      const userId = randomUUID();
+      const onboarding = await (async () => {
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          await setContext(client, userId, null, true);
+          await client.query(
+            `INSERT INTO users (id, name, email, password_hash) VALUES ($1, $2, $3, $4)`,
+            [userId, "Reports Owner", `reports-${userId}@example.test`, await hashPassword("reports-password")],
+          );
+          await client.query("COMMIT");
+        } finally {
+          client.release();
+        }
+        return createBusiness(userId, { name: `Reports ${userId.slice(0, 8)}` });
+      })();
+      const businessId = onboarding.business.id;
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await setContext(client, userId, null, true);
+        const roleId = (await client.query(
+          "SELECT role_id FROM business_memberships WHERE user_id = $1 AND business_id = $2", [userId, businessId],
+        )).rows[0]!.role_id as string;
+        const accounts = (await client.query(
+          "SELECT id, account_code FROM accounts WHERE business_id = $1 AND account_code IN ('1000', '1200', '4000', '5000', '6000')",
+          [businessId],
+        )).rows as Array<{ id: string; account_code: string }>;
+        await client.query("COMMIT");
+        const account = (code: string) => accounts.find((row) => row.account_code === code)!.id;
+        const args = { userId, businessId, roleId };
+
+        await createJournalEntry(args, {
+          entryNo: "REPORT-SALE", date: "2026-01-10", referenceType: "SALE",
+          lines: [
+            { accountId: account("1000"), debit: 200, credit: 0 },
+            { accountId: account("5000"), debit: 80, credit: 0 },
+            { accountId: account("4000"), debit: 0, credit: 200 },
+            { accountId: account("1200"), debit: 0, credit: 80 },
+          ],
+        });
+        await createIncome(args, {
+          entryNo: "REPORT-OTHER-INCOME", date: "2026-01-11", amount: 30,
+          debitAccountId: account("1000"), incomeAccountId: account("4000"), description: "Recycling rebate",
+        });
+        await createJournalEntry(args, {
+          entryNo: "REPORT-EXPENSE", date: "2026-01-12", referenceType: "EXPENSE",
+          lines: [
+            { accountId: account("6000"), debit: 40, credit: 0 },
+            { accountId: account("1000"), debit: 0, credit: 40 },
+          ],
+        });
+
+        const report = await getProfitAndLoss(args, { from: "2026-01-01", to: "2026-01-31" });
+        assert.equal(report.salesRevenue, "200.00");
+        assert.equal(report.cogs, "80.00");
+        assert.equal(report.grossProfit, "120.00");
+        assert.equal(report.operatingExpenses, "40.00");
+        assert.equal(report.otherIncome, "30.00");
+        assert.equal(report.netProfit, "80.00");
+
+        const filtered = await getProfitAndLoss(args, { from: "2026-01-10", to: "2026-01-10" });
+        assert.equal(filtered.salesRevenue, "200.00");
+        assert.equal(filtered.otherIncome, "0.00");
+        await assert.rejects(
+          () => getProfitAndLoss(args, { from: "2026-02-01", to: "2026-01-01" }),
+          (error: { publicCode?: string }) => error.publicCode === "INVALID_DATE_RANGE",
+        );
+
+        await withTenantContext(userId, businessId, async (tenantClient) => {
+          await tenantClient.query(
+            "UPDATE journal_entries SET status = 'REVERSED'::journal_status WHERE entry_no = 'REPORT-EXPENSE'",
+          );
+        });
+        const afterReverse = await getProfitAndLoss(args, { from: "2026-01-01", to: "2026-01-31" });
+        assert.equal(afterReverse.operatingExpenses, "0.00");
+
+        const dashboard = await getDashboard(args, { from: "2026-01-01", to: "2026-01-31" });
+        assert.equal(dashboard.financial.revenue, "200.00");
+        assert.equal(dashboard.financial.cogs, "80.00");
+        assert.equal(dashboard.financial.grossProfit, "120.00");
+        assert.equal(dashboard.financial.netProfit, "120.00");
+        assert.equal(dashboard.purchases.count, 0);
+        assert.equal(dashboard.sales.count, 0);
+        assert.equal(dashboard.inventory.quantity, "0");
+      } finally {
+        await client.query("BEGIN").catch(() => {});
+        await setContext(client, userId, null, true).catch(() => {});
+        await client.query("DELETE FROM businesses WHERE id = $1", [businessId]);
+        await client.query("DELETE FROM users WHERE id = $1", [userId]);
+        await client.query("COMMIT").catch(() => client.query("ROLLBACK"));
+        client.release();
+      }
+    })();
     assert.equal(balanced.lines.length, 2);
     await assert.rejects(
       () => createJournalEntry(args, {

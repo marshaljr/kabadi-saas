@@ -124,8 +124,33 @@ Every error response is `{ "error": "human-readable message" }`, never a
 raw stack trace or database error (section 68) — see
 `src/lib/httpError.ts`.
 
+## Reports
+
+### `GET /api/reports/profit-loss`
+
+Requires `reports.view`. Optional `from` and `to` query parameters use
+inclusive `YYYY-MM-DD` dates. The report reads only `POSTED` journal entries.
+`salesRevenue` is revenue from `SALE` journals, `cogs` is posted COGS,
+`grossProfit = salesRevenue - cogs`, and
+`netProfit = grossProfit - operatingExpenses`. `otherIncome` contains
+non-sale revenue separately and is not included in `netProfit`, preserving the
+project's documented definition.
+
+The response includes `dateRange`, monetary totals as fixed two-decimal
+strings, and `breakdown` rows by revenue, COGS, and expense account.
+
+### `GET /api/reports/dashboard`
+
+Requires `reports.view`. It accepts the same inclusive `from` and `to`
+filters. Purchases, sales, and financial metrics are period-based; inventory
+quantity/value and low-stock count are current snapshots; worker count is a
+current active-worker snapshot. Existing `purchases`, `sales`, `inventory`,
+and `workers` fields are preserved, with `financial` providing revenue, COGS,
+gross profit, operating expenses, and net profit.
+
 ## Related operational endpoints
 
 Implemented tenant-scoped endpoints include `/api/materials`, `/api/purchases`,
-`/api/sales`, `/api/inventory`, `/api/reports/dashboard`, and
+`/api/sales`, `/api/inventory`, `/api/reports/dashboard`,
+`/api/reports/profit-loss`, and
 `/api/billing/subscription`.

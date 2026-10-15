@@ -42,7 +42,7 @@ import { createPurchase, listPurchases } from "./modules/purchases/purchase.serv
 import { createSale, listSales } from "./modules/sales/sale.service.js";
 import { createAdjustment, getInventory } from "./modules/inventory/inventory.service.js";
 import { createExpense, createIncome, createJournalEntry, getLedger, getTrialBalance } from "./modules/accounting/accounting.service.js";
-import { getDashboard } from "./modules/reports/reports.service.js";
+import { getDashboard, getProfitAndLoss } from "./modules/reports/reports.service.js";
 import { getSubscription } from "./modules/billing/billing.service.js";
 
 async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
@@ -348,7 +348,22 @@ const routes: Record<string, Record<string, Handler>> = {
     },
   },
   "/api/reports/dashboard": {
-    GET: async (req, res) => sendJson(res, 200, { dashboard: await getDashboard(tenantArgs(req)) }),
+    GET: async (req, res) => {
+      const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+      sendJson(res, 200, { dashboard: await getDashboard(tenantArgs(req), {
+        from: url.searchParams.get("from") ?? undefined,
+        to: url.searchParams.get("to") ?? undefined,
+      }) });
+    },
+  },
+  "/api/reports/profit-loss": {
+    GET: async (req, res) => {
+      const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+      sendJson(res, 200, { report: await getProfitAndLoss(tenantArgs(req), {
+        from: url.searchParams.get("from") ?? undefined,
+        to: url.searchParams.get("to") ?? undefined,
+      }) });
+    },
   },
   "/api/billing/subscription": {
     GET: async (req, res) => sendJson(res, 200, { subscription: await getSubscription(tenantArgs(req)) }),
