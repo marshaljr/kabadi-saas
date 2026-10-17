@@ -8,7 +8,7 @@ import { hashPassword } from "../../src/lib/password.js";
 import { createCategory, createMaterial, createWorker, listMaterials } from "../../src/modules/people/people.service.js";
 import { createPurchase } from "../../src/modules/purchases/purchase.service.js";
 import { createSale } from "../../src/modules/sales/sale.service.js";
-import { withTenantContext } from "../../src/db/tenantContext.js";
+import { withGlobalContext, withPlatformAdminContext, withTenantContext } from "../../src/db/tenantContext.js";
 import { createAdjustment, getInventory } from "../../src/modules/inventory/inventory.service.js";
 import { createExpense, createIncome, createJournalEntry, getLedger, getTrialBalance } from "../../src/modules/accounting/accounting.service.js";
 import { getDashboard, getProfitAndLoss } from "../../src/modules/reports/reports.service.js";
@@ -422,6 +422,68 @@ test("accounting journals stay balanced, tenant-scoped, and atomic", async () =>
     await client.query("DELETE FROM users WHERE id = $1", [userId]);
     await client.query("COMMIT").catch(() => client.query("ROLLBACK"));
     client.release();
+  }
+});
+
+test("subscription worker limits are enforced atomically and usage is counted once", async () => {
+  const userId = randomUUID();
+  const setupClient = await pool.connect();
+  let businessId: string | undefined;
+  let planId: string | undefined;
+  try {
+    await setupClient.query("BEGIN");
+    await setContext(setupClient, userId, null, true);
+    await setupClient.query(
+      "INSERT INTO users (id, name, email, password_hash) VALUES ($1, $2, $3, $4)",
+      [userId, "Quota Owner", `quota-${userId}@example.test`, await hashPassword("quota-password")],
+    );
+    await setupClient.query("COMMIT");
+    businessId = (await createBusiness(userId, { name: `Quota ${userId.slice(0, 8)}` })).business.id;
+    const roleId = (await withTenantContext(userId, businessId, (client) =>
+      client.query("SELECT role_id FROM business_memberships WHERE user_id = $1 AND business_id = $2", [userId, businessId]))).rows[0]!.role_id as string;
+
+    planId = (await withPlatformAdminContext(userId, (client) => client.query<{ id: string }>(
+      `INSERT INTO plans (code, name, max_workers) VALUES ($1, $2, 1) RETURNING id`,
+      [`TEST-${userId.slice(0, 8)}`, "Quota Test"],
+    ))).rows[0]!.id;
+    await withTenantContext(userId, businessId, async (client) => {
+      await client.query("UPDATE subscriptions SET plan_id = $1 WHERE business_id = $2", [planId, businessId]);
+    });
+    const args = { userId, businessId, roleId };
+    await createWorker(args, { name: "First worker" });
+    await assert.rejects(
+      () => createWorker(args, { name: "Second worker" }),
+      (error: { publicCode?: string; statusCode?: number }) =>
+        error.publicCode === "PLAN_LIMIT_EXCEEDED" && error.statusCode === 409,
+    );
+    const usage = await withTenantContext(userId, businessId, (client) =>
+      client.query(
+        "SELECT value::text FROM usage_records WHERE business_id = $1 AND metric = 'workers'",
+        [businessId],
+      ));
+    assert.equal(usage.rows[0]!.value, "1.0000");
+
+    const concurrent = await Promise.allSettled([
+      createWorker(args, { name: "Concurrent A" }),
+      createWorker(args, { name: "Concurrent B" }),
+    ]);
+    assert.equal(concurrent.filter((result) => result.status === "fulfilled").length, 0);
+  } finally {
+    await setupClient.query("BEGIN").catch(() => {});
+    await setContext(setupClient, userId, null, true).catch(() => {});
+    if (businessId && planId) {
+      await setupClient.query(
+        `UPDATE subscriptions
+         SET plan_id = (SELECT id FROM plans WHERE code = 'FREE')
+         WHERE business_id = $1`,
+        [businessId],
+      ).catch(() => {});
+    }
+    if (businessId) await setupClient.query("DELETE FROM businesses WHERE id = $1", [businessId]);
+    if (planId) await setupClient.query("DELETE FROM plans WHERE id = $1", [planId]);
+    await setupClient.query("DELETE FROM users WHERE id = $1", [userId]);
+    await setupClient.query("COMMIT").catch(() => setupClient.query("ROLLBACK"));
+    setupClient.release();
   }
 });
 

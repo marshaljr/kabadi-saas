@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { withTenantContext } from "../../db/tenantContext.js";
 import { requirePermission } from "../../middleware/authorize.js";
 import { getSystemAccountId, insertJournalEntry } from "../accounting/accounting.service.js";
+import { reserveQuota, recordQuotaUsage } from "../billing/billing.service.js";
 
 export interface SaleItemInput {
   materialId: string;
@@ -17,6 +18,7 @@ export async function createSale(
   if (!input.items.length) throw new Error("At least one sale item is required");
   return withTenantContext(args.userId, args.businessId, async (client) => {
     await requirePermission(client, args.roleId, "sales.create");
+    await reserveQuota(client, args.businessId, "transactions");
     const subtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
     const discount = input.discount ?? 0;
     const taxAmount = input.taxAmount ?? 0;
@@ -63,13 +65,6 @@ export async function createSale(
         [randomUUID(), args.businessId, item.materialId, saleId, item.quantity, item.unit, averageCost, args.userId],
       );
     }
-    await client.query(
-      `INSERT INTO usage_records (business_id, period_start, metric, value)
-       VALUES ($1, date_trunc('month', current_date)::date, 'transactions', 1)
-       ON CONFLICT (business_id, period_start, metric)
-       DO UPDATE SET value = usage_records.value + 1, updated_at = now()`,
-      [args.businessId],
-    );
     const cogs = costing.reduce((sum, item) => sum + item.cogs, 0);
     const cashAccount = await getSystemAccountId(client, args.businessId, "1000");
     const receivableAccount = await getSystemAccountId(client, args.businessId, "1100");
@@ -93,6 +88,7 @@ export async function createSale(
       description: `Sale ${input.saleNo.trim()}`,
       lines: saleLines,
     });
+    await recordQuotaUsage(client, args.businessId, "transactions");
     return { sale: sale.rows[0], grossProfit: totalAmount - cogs, cogs };
   });
 }

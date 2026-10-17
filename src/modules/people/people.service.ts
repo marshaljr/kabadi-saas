@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { withTenantContext } from "../../db/tenantContext.js";
 import { requirePermission } from "../../middleware/authorize.js";
+import { reserveQuota, recordQuotaUsage } from "../billing/billing.service.js";
 
 type TenantArgs = { userId: string; businessId: string; roleId: string };
 
@@ -13,6 +14,7 @@ async function insert(
 ) {
   return withTenantContext(args.userId, args.businessId, async (client) => {
     await requirePermission(client, args.roleId, permission);
+    if (table === "workers") await reserveQuota(client, args.businessId, "workers");
     const id = randomUUID();
     const placeholders = columns.map((_, index) => `$${index + 3}`).join(", ");
     const result = await client.query(
@@ -22,13 +24,7 @@ async function insert(
       [id, args.businessId, ...values],
     );
     if (table === "workers") {
-      await client.query(
-        `INSERT INTO usage_records (business_id, period_start, metric, value)
-         VALUES ($1, date_trunc('month', current_date)::date, 'workers', 1)
-         ON CONFLICT (business_id, period_start, metric)
-         DO UPDATE SET value = usage_records.value + 1, updated_at = now()`,
-        [args.businessId],
-      );
+      await recordQuotaUsage(client, args.businessId, "workers");
     }
     return result.rows[0];
   });

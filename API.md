@@ -67,6 +67,27 @@ Header: `Authorization: Bearer <business-scoped token>`
 Returns the current business period's usage records and the selected plan's
 limit columns. Requires the `reports.view` permission.
 
+Plan limits are enforced server-side for worker creation and purchase/sale
+transactions. Worker limits count active workers (`deleted_at IS NULL`);
+transaction limits count the `transactions` usage record for the current
+calendar month. Checks and quota updates run inside the same tenant
+transaction and serialize on the subscription row, so concurrent requests
+cannot exceed a configured limit. Successful operations increment usage once;
+failed transactions roll back the usage change.
+
+When a limit is reached, the API returns HTTP `409` with:
+`{ "error": "... limit reached (...)", "code": "PLAN_LIMIT_EXCEEDED" }`.
+Missing subscription configuration returns HTTP `403` with code
+`SUBSCRIPTION_REQUIRED`.
+
+The schema also defines `max_users`, `max_branches`, and `max_storage_mb`.
+They remain reported by the usage and plan endpoints but are not enforced
+because this repository has no user-provisioning, branch, or storage-upload
+operation to consume those quotas. Subscription statuses are likewise
+reported; no status-based blocking policy is applied because the current
+product documentation does not define one and this phase does not add payment
+collection or webhooks.
+
 ### `GET /api/platform/businesses`
 
 Header: `Authorization: Bearer <identity token>`

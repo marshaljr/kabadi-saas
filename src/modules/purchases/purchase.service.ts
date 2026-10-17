@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { withTenantContext } from "../../db/tenantContext.js";
 import { requirePermission } from "../../middleware/authorize.js";
 import { getSystemAccountId, insertJournalEntry } from "../accounting/accounting.service.js";
+import { reserveQuota, recordQuotaUsage } from "../billing/billing.service.js";
 
 export interface PurchaseItemInput {
   materialId: string;
@@ -32,6 +33,7 @@ export async function createPurchase(
 
   return withTenantContext(args.userId, args.businessId, async (client) => {
     await requirePermission(client, args.roleId, "purchases.create");
+    await reserveQuota(client, args.businessId, "transactions");
     const subtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
     const discount = input.discount ?? 0;
     const taxAmount = input.taxAmount ?? 0;
@@ -63,13 +65,6 @@ export async function createPurchase(
         [randomUUID(), args.businessId, item.materialId, purchaseId, item.quantity, item.unit, item.unitPrice, args.userId],
       );
     }
-    await client.query(
-      `INSERT INTO usage_records (business_id, period_start, metric, value)
-       VALUES ($1, date_trunc('month', current_date)::date, 'transactions', 1)
-       ON CONFLICT (business_id, period_start, metric)
-       DO UPDATE SET value = usage_records.value + 1, updated_at = now()`,
-      [args.businessId],
-    );
     const inventoryAccount = await getSystemAccountId(client, args.businessId, "1200");
     const cashAccount = await getSystemAccountId(client, args.businessId, "1000");
     const payableAccount = await getSystemAccountId(client, args.businessId, input.workerId ? "2000" : "2010");
@@ -91,6 +86,7 @@ export async function createPurchase(
         ...payableLines,
       ],
     });
+    await recordQuotaUsage(client, args.businessId, "transactions");
     return { purchase: header.rows[0], items: input.items };
   });
 }
