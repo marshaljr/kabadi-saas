@@ -74,7 +74,13 @@ function tenantArgs(req: IncomingMessage) {
 
 function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
   const payload = JSON.stringify(body);
-  res.writeHead(statusCode, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) });
+  res.writeHead(statusCode, {
+    "Content-Type": "application/json",
+    "Content-Length": Buffer.byteLength(payload),
+    "Access-Control-Allow-Origin": env.corsOrigin,
+    "Access-Control-Allow-Headers": "Authorization, Content-Type",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  });
   res.end(payload);
 }
 
@@ -371,6 +377,15 @@ const routes: Record<string, Record<string, Handler>> = {
 };
 
 export const server = createServer((req, res) => {
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, {
+      "Access-Control-Allow-Origin": env.corsOrigin,
+      "Access-Control-Allow-Headers": "Authorization, Content-Type",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    });
+    res.end();
+    return;
+  }
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
   const routeHandlers = routes[url.pathname];
   const handler = routeHandlers?.[req.method ?? "GET"];

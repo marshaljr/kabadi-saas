@@ -91,6 +91,28 @@ tests/                 node:test unit tests (run with `npm test`)
    npm run dev
    ```
 
+## Frontend
+
+The React/Vite frontend lives in `frontend/` and uses the existing API
+without demo data. Start the backend with `npm run dev`, then start the
+frontend with:
+
+```sh
+npm run frontend:build
+npx vite --config frontend/vite.config.ts
+```
+
+For local development, `VITE_API_BASE_URL` defaults to
+`http://localhost:3000`. Set it in a frontend `.env` file when the API is
+hosted elsewhere. The backend accepts browser requests only from
+`CORS_ORIGIN` (default `http://localhost:5173`); set that server-side
+environment variable to the exact frontend origin in deployment. Never put
+database credentials or server secrets in frontend environment variables.
+
+The collection screen stores unfinished work only as explicitly labelled
+local drafts scoped to the current browser. Drafts are never submitted
+automatically and do not affect inventory, accounting, stock, or usage.
+
 ## Documentation
 
 - `ARCHITECTURE.md` — the Phase 0 architecture analysis and the SaaS

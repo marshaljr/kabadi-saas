@@ -23,6 +23,7 @@ function optional(name: string, fallback: string): string {
 export interface AppEnv {
   nodeEnv: "development" | "test" | "production";
   port: number;
+  corsOrigin: string;
 
   databaseUrl: string;
   databaseMigrationUrl: string;
@@ -43,6 +44,7 @@ function loadEnv(): AppEnv {
   return {
     nodeEnv,
     port: Number(optional("PORT", "3000")),
+    corsOrigin: optional("CORS_ORIGIN", "http://localhost:5173"),
 
     databaseUrl: nodeEnv === "test" ? optional("DATABASE_URL", "") : required("DATABASE_URL"),
     databaseMigrationUrl: nodeEnv === "test" ? optional("DATABASE_MIGRATION_URL", "") : required("DATABASE_MIGRATION_URL"),
