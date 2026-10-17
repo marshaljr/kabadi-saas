@@ -13,6 +13,17 @@ const base = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000";
 const identityKey = "kabadi.identityToken";
 const accessKey = "kabadi.accessToken";
 
+export function getDraftScope(): string {
+  const token = localStorage.getItem(accessKey);
+  if (!token) return "unknown";
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1] ?? ""));
+    return `${payload.userId ?? payload.sub ?? "user"}.${payload.businessId ?? "business"}`;
+  } catch {
+    return "unknown";
+  }
+}
+
 async function request<T>(path: string, options: RequestInit = {}, token = localStorage.getItem(accessKey) ?? localStorage.getItem(identityKey)): Promise<T> {
   const response = await fetch(`${base}${path}`, {
     ...options,

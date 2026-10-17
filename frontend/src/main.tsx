@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { api, Business, Dashboard, hasIdentity, Pnl, saveAccess, saveIdentity, signOut } from "./api";
+import { api, Business, Dashboard, getDraftScope, hasIdentity, Pnl, saveAccess, saveIdentity, signOut } from "./api";
 import "./styles.css";
 
 const money = (value: string | number | undefined) => `NPR ${Number(value ?? 0).toLocaleString("en-NP", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -33,7 +33,7 @@ function Workspace({ onSignOut }: { onSignOut: () => void }) {
   useEffect(() => { api.dashboard().then(r => setDashboard(r.dashboard)).catch(e => setError(e.message)); }, []);
   useEffect(() => { if (page === "reports") api.pnl(from || undefined, to || undefined).then(r => setPnl(r.report)).catch(e => setError(e.message)); }, [page, from, to]);
   const nav: Array<[string, string]> = [["dashboard", "Overview"], ["collections", "Collections"], ["workers", "Workers"], ["materials", "Materials"], ["sales", "Sales"], ["inventory", "Inventory"], ["accounting", "Accounting"], ["reports", "Reports"], ["billing", "Plan & usage"]];
-  return <div className="app-shell"><aside><div className="side-brand"><div className="brand-mark small">K</div><div><strong>Kabadi Desk</strong><small>Nepal operations</small></div></div><nav>{nav.map(([id, label]) => <button className={page === id ? "active" : ""} key={id} onClick={() => setPage(id)}><span className={`nav-icon ${id}`} />{label}</button>)}</nav><div className="side-footer"><button onClick={onSignOut}>Sign out</button><small>Asia/Kathmandu · NPR</small></div></aside><main className="content"><header><div><p className="eyebrow">KATHMANDU WORKSPACE</p><h2>{nav.find(n => n[0] === page)?.[1] ?? "Overview"}</h2></div><div className="header-actions"><span className="status-dot">Live</span><button className="icon-button" onClick={() => { localStorage.removeItem("kabadi.accessToken"); location.reload(); }}>Switch</button></div></header>{error && <div className="alert danger">{error}</div>}{page === "dashboard" && <DashboardPage dashboard={dashboard} onDate={(f, t) => { setFrom(f); setTo(t); api.dashboard(f || undefined, t || undefined).then(r => setDashboard(r.dashboard)).catch(e => setError(e.message)); }} />}{page === "reports" && <ReportsPage pnl={pnl} from={from} to={to} setFrom={setFrom} setTo={setTo} />}{["collections", "workers", "materials", "sales", "inventory", "accounting", "billing"].includes(page) && <ResourcePage resource={page} />}</main></div>;
+  return <div className="app-shell"><aside><div className="side-brand"><div className="brand-mark small">K</div><div><strong>Kabadi Desk</strong><small>Nepal operations</small></div></div><nav>{nav.map(([id, label]) => <button className={page === id ? "active" : ""} key={id} onClick={() => setPage(id)}><span className={`nav-icon ${id}`} />{label}</button>)}</nav><div className="side-footer"><button onClick={onSignOut}>Sign out</button><small>Asia/Kathmandu · NPR</small></div></aside><main className="content"><header><div><p className="eyebrow">KATHMANDU WORKSPACE</p><h2>{nav.find(n => n[0] === page)?.[1] ?? "Overview"}</h2></div><div className="header-actions"><span className="status-dot">Live</span><button className="icon-button" onClick={() => { localStorage.removeItem("kabadi.accessToken"); location.reload(); }}>Switch</button></div></header>{error && <div className="alert danger">{error}</div>}{page === "dashboard" && <DashboardPage dashboard={dashboard} onDate={(f, t) => { setFrom(f); setTo(t); api.dashboard(f || undefined, t || undefined).then(r => setDashboard(r.dashboard)).catch(e => setError(e.message)); }} />}{page === "reports" && <ReportsPage pnl={pnl} from={from} to={to} setFrom={setFrom} setTo={setTo} />}{page === "collections" ? <CollectionPage /> : ["workers", "materials", "sales", "inventory", "accounting", "billing"].includes(page) && <ResourcePage resource={page} />}</main></div>;
 }
 
 function DashboardPage({ dashboard, onDate }: { dashboard?: Dashboard; onDate: (from: string, to: string) => void }) {
@@ -44,6 +44,54 @@ function DashboardPage({ dashboard, onDate }: { dashboard?: Dashboard; onDate: (
 
 function ReportsPage({ pnl, from, to, setFrom, setTo }: { pnl?: Pnl; from: string; to: string; setFrom: (v: string) => void; setTo: (v: string) => void }) {
   return <><div className="toolbar"><div><p className="muted">Posted journals only · other income shown separately</p></div><div className="date-filter"><input type="date" value={from} onChange={e => setFrom(e.target.value)} /><span>to</span><input type="date" value={to} onChange={e => setTo(e.target.value)} /></div></div>{!pnl ? <Loading /> : <><section className="metric-grid">{[["Sales revenue", pnl.salesRevenue], ["COGS", pnl.cogs], ["Gross profit", pnl.grossProfit], ["Expenses", pnl.operatingExpenses], ["Other income", pnl.otherIncome], ["Net profit", pnl.netProfit]].map(([label, value]) => <article className="metric-card" key={label}><span>{label}</span><strong>{money(value)}</strong></article>)}</section><article className="panel table-panel"><div className="panel-heading"><h3>Account breakdown</h3></div><Table columns={["Account", "Type", "Debit", "Credit"]} rows={pnl.breakdown.map(row => [row.name, row.type, money(row.debit), money(row.credit)])} /></article></>}</>;
+}
+
+type DraftSession = { id: string; worker: string; details: string; updatedAt: string };
+
+function CollectionPage() {
+  const key = draftKey(getDraftScope());
+  const [sessions, setSessions] = useState<DraftSession[]>([]);
+  const [worker, setWorker] = useState("");
+  const [details, setDetails] = useState("");
+  const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(key) ?? "[]");
+      setSessions(Array.isArray(saved) ? saved : []);
+    } catch {
+      setSessions([]);
+    }
+  }, [key]);
+
+  function persist(next: DraftSession[]) {
+    setSessions(next);
+    localStorage.setItem(key, JSON.stringify(next));
+  }
+
+  function hold(event: React.FormEvent) {
+    event.preventDefault();
+    if (!worker.trim()) return;
+    const now = new Date().toISOString();
+    persist([{ id: crypto.randomUUID(), worker: worker.trim(), details: details.trim(), updatedAt: now }, ...sessions]);
+    setWorker("");
+    setDetails("");
+    setNotice("Draft held locally. It has not been posted to the server.");
+  }
+
+  function resume(session: DraftSession) {
+    setWorker(session.worker);
+    setDetails(session.details);
+    persist(sessions.filter(item => item.id !== session.id));
+    setNotice("Draft resumed. Hold it again when you switch workers.");
+  }
+
+  function discard(id: string) {
+    persist(sessions.filter(item => item.id !== id));
+    setNotice("Local draft discarded.");
+  }
+
+  return <><div className="toolbar"><div><p className="muted">Start a worker collection, hold it, and resume it later. Nothing is posted until a supported transaction form is submitted.</p></div></div><div className="collection-grid"><article className="panel"><div className="panel-heading"><div><p className="eyebrow">NEW COLLECTION</p><h3>Working session</h3></div></div><form className="collection-form" onSubmit={hold}><label>Worker name<input required value={worker} onChange={e => setWorker(e.target.value)} placeholder="Select or enter worker" /></label><label>Draft details<textarea value={details} onChange={e => setDetails(e.target.value)} placeholder="Materials, quantities, rates, or notes" rows={5} /></label><button className="primary" type="submit">Hold collection</button></form><p className="draft-note">Local draft only · does not affect stock, cash, accounting, or usage.</p></article><article className="panel"><div className="panel-heading"><div><p className="eyebrow">ACTIVE SESSIONS</p><h3>{sessions.length ? `${sessions.length} held collection${sessions.length === 1 ? "" : "s"}` : "No held collections"}</h3></div></div>{sessions.length ? <div className="session-list">{sessions.map(session => <div className="session-card" key={session.id}><div><strong>{session.worker}</strong><p>{session.details || "No details added"}</p><small>Last activity {new Date(session.updatedAt).toLocaleString("en-NP", { timeZone: "Asia/Kathmandu" })}</small></div><div className="session-actions"><button className="secondary" onClick={() => resume(session)}>Resume</button><button className="link-button danger-text" onClick={() => discard(session.id)}>Discard</button></div></div>)}</div> : <Empty title="Nothing held yet" text="Hold a collection when you need to switch to another worker." />}</article></div>{notice && <div className="alert success">{notice}</div>}</>;
 }
 
 function ResourcePage({ resource }: { resource: string }) {
@@ -59,7 +107,7 @@ function ResourcePage({ resource }: { resource: string }) {
   };
   const current = config[resource]!;
   useEffect(() => { setLoading(true); api.list(current.endpoint).then(result => { const first = Object.values(result)[0]; setRows(Array.isArray(first) ? first as Record<string, unknown>[] : []); }).catch(e => setError(e.message)).finally(() => setLoading(false)); }, [resource]);
-  async function add(e: React.FormEvent) { e.preventDefault(); if (!name.trim()) return; try { if (resource === "workers") await api.create("workers", { name }); else { const drafts = JSON.parse(localStorage.getItem(draftKey("current")) ?? "[]"); drafts.push({ resource, name, createdAt: new Date().toISOString(), draft: true }); localStorage.setItem(draftKey("current"), JSON.stringify(drafts)); setNotice("Saved as a local draft. This has not been posted to the server."); } setName(""); if (resource === "workers") { const result = await api.list(current.endpoint); setRows(Object.values(result)[0] as Record<string, unknown>[]); } } catch (err) { setError((err as Error).message); } }
+  async function add(e: React.FormEvent) { e.preventDefault(); if (!name.trim()) return; try { if (resource === "workers") await api.create("workers", { name }); else { const drafts = JSON.parse(localStorage.getItem(draftKey(getDraftScope())) ?? "[]"); drafts.push({ resource, name, createdAt: new Date().toISOString(), draft: true }); localStorage.setItem(draftKey(getDraftScope()), JSON.stringify(drafts)); setNotice("Saved as a local draft. This has not been posted to the server."); } setName(""); if (resource === "workers") { const result = await api.list(current.endpoint); setRows(Object.values(result)[0] as Record<string, unknown>[]); } } catch (err) { setError((err as Error).message); } }
   return <><div className="toolbar"><div><p className="muted">{resource === "collections" ? "Start a worker collection, hold it, and post only when complete." : "Real tenant data from the backend API."}</p></div>{["workers", "collections"].includes(resource) && <form className="quick-add" onSubmit={add}><input value={name} onChange={e => setName(e.target.value)} placeholder={`${current.label} name`} /><button className="primary">Add</button></form>}</div>{notice && <div className="alert success">{notice}</div>}{error && <div className="alert danger">{error}</div>}{loading ? <Loading /> : <article className="panel table-panel"><div className="panel-heading"><h3>{current.title}</h3><span className="muted">{rows.length} records</span></div>{rows.length ? <Table columns={current.fields.map(f => f.replaceAll("_", " "))} rows={rows.map(row => current.fields.map(field => String(row[field] ?? "—"))) } /> : <Empty title={`No ${current.title.toLowerCase()} yet`} text="Records created in this workspace will appear here." />}</article>}</>;
 }
 
