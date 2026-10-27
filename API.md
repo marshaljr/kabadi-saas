@@ -169,6 +169,14 @@ current active-worker snapshot. Existing `purchases`, `sales`, `inventory`,
 and `workers` fields are preserved, with `financial` providing revenue, COGS,
 gross profit, operating expenses, and net profit.
 
+## Worker profile
+
+### `GET /api/worker-profile?workerId=<uuid>`
+
+Requires `workers.view` and `purchases.view`. Returns the tenant-scoped worker,
+backend-calculated purchase totals, payable summary, and itemized posted
+collections. Tenant identity always comes from the bearer token.
+
 ## Related operational endpoints
 
 Implemented tenant-scoped endpoints include `/api/materials`, `/api/purchases`,

@@ -35,7 +35,7 @@ import {
   listPlatformBusinesses,
 } from "./modules/business/business.service.js";
 import {
-  createCategory, createCustomer, createMaterial, createPaymentMethod, createSupplier, createWorker,
+  createCategory, createCustomer, createMaterial, createPaymentMethod, createSupplier, createWorker, getWorkerProfile,
   listCategories, listCustomers, listMaterials, listPaymentMethods, listSuppliers, listWorkers,
 } from "./modules/people/people.service.js";
 import { createPurchase, listPurchases } from "./modules/purchases/purchase.service.js";
@@ -211,6 +211,14 @@ const routes: Record<string, Record<string, Handler>> = {
         phone: typeof body.phone === "string" ? body.phone : undefined, address: typeof body.address === "string" ? body.address : undefined,
         joiningDate: typeof body.joiningDate === "string" ? body.joiningDate : undefined, notes: typeof body.notes === "string" ? body.notes : undefined,
       }) });
+    },
+  },
+  "/api/worker-profile": {
+    GET: async (req, res) => {
+      const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+      const workerId = url.searchParams.get("workerId");
+      if (!workerId) throw new HttpError(400, "workerId is required", "INVALID_WORKER");
+      sendJson(res, 200, { profile: await getWorkerProfile(tenantArgs(req), workerId) });
     },
   },
   "/api/customers": {

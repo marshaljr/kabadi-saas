@@ -64,6 +64,40 @@ export const createWorker = (
 
 export const listWorkers = (args: TenantArgs) => list(args, "workers", "workers.view");
 
+export async function getWorkerProfile(args: TenantArgs, workerId: string) {
+  return withTenantContext(args.userId, args.businessId, async (client) => {
+    await requirePermission(client, args.roleId, "workers.view");
+    await requirePermission(client, args.roleId, "purchases.view");
+    const workerResult = await client.query(
+      `SELECT id, name, worker_code, phone, address, joining_date, payable_balance, advance_balance
+       FROM workers WHERE id = $1 AND business_id = $2 AND deleted_at IS NULL`,
+      [workerId, args.businessId],
+    );
+    if (!workerResult.rows[0]) throw new Error("Worker not found");
+    const purchases = await client.query(
+      `SELECT p.*, COALESCE(json_agg(pi ORDER BY pi.created_at) FILTER (WHERE pi.id IS NOT NULL), '[]') AS items
+       FROM purchases p LEFT JOIN purchase_items pi ON pi.purchase_id = p.id
+       WHERE p.business_id = $1 AND p.worker_id = $2
+       GROUP BY p.id ORDER BY p.date DESC, p.created_at DESC`,
+      [args.businessId, workerId],
+    );
+    const totals = await client.query(
+      `SELECT COUNT(*)::int AS collections,
+              COALESCE(SUM(total_amount), 0)::text AS purchased,
+              COALESCE(SUM(paid_amount), 0)::text AS paid,
+              COALESCE(SUM(due_amount), 0)::text AS outstanding
+       FROM purchases WHERE business_id = $1 AND worker_id = $2`,
+      [args.businessId, workerId],
+    );
+    const total = totals.rows[0]!;
+    return {
+      worker: workerResult.rows[0],
+      summary: { totalPurchased: total.purchased, totalPaid: total.paid, outstanding: total.outstanding, totalCollections: total.collections },
+      collections: purchases.rows,
+    };
+  });
+}
+
 export const createCustomer = (args: TenantArgs, input: { name: string; customerCode?: string; phone?: string; address?: string }) =>
   insert(args, "customers", "customers.manage", ["name", "customer_code", "phone", "address"], [input.name.trim(), input.customerCode?.trim() || null, input.phone?.trim() || null, input.address?.trim() || null]);
 
