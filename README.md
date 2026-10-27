@@ -11,11 +11,11 @@ against that spec before implementation began.
 
 ## Status
 
-**Phase 1 (project foundation + authentication foundation) is complete.**
+**Phase 2 (SaaS foundation) is complete.**
 See `DEVELOPMENT_STATUS.md` for exactly what that does and does not include,
 and `NEXT_STEPS.md` for what Phase 2 covers next.
 
-## Stack (Phase 1)
+## Stack (Phase 2)
 
 - **Language:** TypeScript (strict mode), Node.js 20+, ES modules
 - **Database:** PostgreSQL 15+ with Row-Level Security
@@ -36,7 +36,7 @@ and `NEXT_STEPS.md` for what Phase 2 covers next.
 ## Project layout
 
 ```
-migrations/           Numbered, ordered SQL migrations (0001-0008)
+migrations/           Numbered, ordered SQL migrations (0001-0010)
 docs/ERD.mermaid       Versioned ERD source (regenerate PNG with mmdc)
 src/
   config/env.ts        Centralized environment variable loading
@@ -45,9 +45,9 @@ src/
   lib/                  password.ts, jwt.ts, httpError.ts — dependency-free
   middleware/authorize.ts   Backend permission checks (never trust the
                              frontend for authorization — section 32)
-  modules/auth/auth.service.ts   signup / login / list businesses /
-                                   select active business
-  server.ts             Wires auth endpoints over plain node:http
+  modules/auth/auth.service.ts       signup / login / membership selection
+  modules/business/business.service.ts onboarding, usage, plans, platform admin
+  server.ts                           Wires the API over plain node:http
 tests/                 node:test unit tests (run with `npm test`)
 ```
 
@@ -90,6 +90,28 @@ tests/                 node:test unit tests (run with `npm test`)
    npm test
    npm run dev
    ```
+
+## Frontend
+
+The React/Vite frontend lives in `frontend/` and uses the existing API
+without demo data. Start the backend with `npm run dev`, then start the
+frontend with:
+
+```sh
+npm run frontend:build
+npx vite --config frontend/vite.config.ts
+```
+
+For local development, `VITE_API_BASE_URL` defaults to
+`http://localhost:3000`. Set it in a frontend `.env` file when the API is
+hosted elsewhere. The backend accepts browser requests only from
+`CORS_ORIGIN` (default `http://localhost:5173`); set that server-side
+environment variable to the exact frontend origin in deployment. Never put
+database credentials or server secrets in frontend environment variables.
+
+The collection screen stores unfinished work only as explicitly labelled
+local drafts scoped to the current browser. Drafts are never submitted
+automatically and do not affect inventory, accounting, stock, or usage.
 
 ## Documentation
 

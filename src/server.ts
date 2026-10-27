@@ -18,15 +18,32 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { env } from "./config/env.js";
+import { HttpError, toSafeErrorResponse } from "./lib/httpError.js";
 import {
   AuthError,
   listMyBusinesses,
   login,
   selectActiveBusiness,
   signup,
+  verifyBusinessScopedToken,
   verifyIdentityToken,
 } from "./modules/auth/auth.service.js";
-import { toSafeErrorResponse } from "./lib/httpError.js";
+import {
+  createBusiness,
+  getUsage,
+  listPlans,
+  listPlatformBusinesses,
+} from "./modules/business/business.service.js";
+import {
+  createCategory, createCustomer, createMaterial, createPaymentMethod, createSupplier, createWorker, getWorkerProfile,
+  listCategories, listCustomers, listMaterials, listPaymentMethods, listSuppliers, listWorkers,
+} from "./modules/people/people.service.js";
+import { createPurchase, listPurchases } from "./modules/purchases/purchase.service.js";
+import { createSale, listSales } from "./modules/sales/sale.service.js";
+import { createAdjustment, getInventory } from "./modules/inventory/inventory.service.js";
+import { createExpense, createIncome, createJournalEntry, getLedger, getTrialBalance } from "./modules/accounting/accounting.service.js";
+import { getDashboard, getProfitAndLoss } from "./modules/reports/reports.service.js";
+import { getSubscription } from "./modules/billing/billing.service.js";
 
 async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
@@ -37,7 +54,7 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
   try {
     return JSON.parse(Buffer.concat(chunks).toString("utf8"));
   } catch {
-    throw new Error("Request body must be valid JSON");
+    throw new HttpError(400, "Request body must be valid JSON", "INVALID_JSON");
   }
 }
 
@@ -46,12 +63,24 @@ function getBearerToken(req: IncomingMessage): string {
   if (!header || !header.startsWith("Bearer ")) {
     throw new AuthError("Missing or malformed Authorization header", "INVALID_CREDENTIALS");
   }
+
   return header.slice("Bearer ".length);
+}
+
+function tenantArgs(req: IncomingMessage) {
+  const payload = verifyBusinessScopedToken(getBearerToken(req));
+  return { userId: payload.sub, businessId: payload.businessId, roleId: payload.roleId };
 }
 
 function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
   const payload = JSON.stringify(body);
-  res.writeHead(statusCode, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) });
+  res.writeHead(statusCode, {
+    "Content-Type": "application/json",
+    "Content-Length": Buffer.byteLength(payload),
+    "Access-Control-Allow-Origin": env.corsOrigin,
+    "Access-Control-Allow-Headers": "Authorization, Content-Type",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  });
   res.end(payload);
 }
 
@@ -104,9 +133,267 @@ const routes: Record<string, Record<string, Handler>> = {
       sendJson(res, 200, result);
     },
   },
+  "/api/auth/switch-business": {
+    POST: async (req, res) => {
+      const token = getBearerToken(req);
+      const payload = verifyIdentityToken(token);
+      const body = await readJsonBody(req);
+      const { businessId } = body as { businessId?: string };
+      if (!businessId) {
+        throw new AuthError("businessId is required", "NOT_A_MEMBER");
+      }
+      const result = await selectActiveBusiness(payload.sub, businessId);
+      sendJson(res, 200, result);
+    },
+  },
+  "/api/businesses": {
+    POST: async (req, res) => {
+      const token = getBearerToken(req);
+      const payload = verifyIdentityToken(token);
+      const body = await readJsonBody(req);
+      const result = await createBusiness(payload.sub, {
+        name: String(body.name ?? ""),
+        address: typeof body.address === "string" ? body.address : undefined,
+        phone: typeof body.phone === "string" ? body.phone : undefined,
+        email: typeof body.email === "string" ? body.email : undefined,
+        planCode: typeof body.planCode === "string" ? body.planCode : undefined,
+      });
+      sendJson(res, 201, result);
+    },
+  },
+  "/api/usage": {
+    GET: async (req, res) => {
+      const token = getBearerToken(req);
+      const payload = verifyBusinessScopedToken(token);
+      const usage = await getUsage(payload.sub, payload.businessId, payload.roleId);
+      sendJson(res, 200, { usage });
+    },
+  },
+  "/api/plans": {
+    GET: async (_req, res) => {
+      sendJson(res, 200, { plans: await listPlans() });
+    },
+  },
+  "/api/platform/businesses": {
+    GET: async (req, res) => {
+      const token = getBearerToken(req);
+      const payload = verifyIdentityToken(token);
+      const businesses = await listPlatformBusinesses(payload.sub);
+      sendJson(res, 200, { businesses });
+    },
+  },
+  "/api/categories": {
+    GET: async (req, res) => sendJson(res, 200, { categories: await listCategories(tenantArgs(req)) }),
+    POST: async (req, res) => {
+      const body = await readJsonBody(req);
+      sendJson(res, 201, { category: await createCategory(tenantArgs(req), String(body.name ?? ""), typeof body.description === "string" ? body.description : undefined) });
+    },
+  },
+  "/api/materials": {
+    GET: async (req, res) => sendJson(res, 200, { materials: await listMaterials(tenantArgs(req)) }),
+    POST: async (req, res) => {
+      const body = await readJsonBody(req);
+      sendJson(res, 201, { material: await createMaterial(tenantArgs(req), {
+        categoryId: String(body.categoryId ?? ""), name: String(body.name ?? ""),
+        sku: typeof body.sku === "string" ? body.sku : undefined,
+        defaultUnit: typeof body.defaultUnit === "string" ? body.defaultUnit : undefined,
+        minimumStock: typeof body.minimumStock === "number" ? body.minimumStock : undefined,
+        notes: typeof body.notes === "string" ? body.notes : undefined,
+      }) });
+    },
+  },
+  "/api/workers": {
+    GET: async (req, res) => sendJson(res, 200, { workers: await listWorkers(tenantArgs(req)) }),
+    POST: async (req, res) => {
+      const body = await readJsonBody(req);
+      sendJson(res, 201, { worker: await createWorker(tenantArgs(req), {
+        name: String(body.name ?? ""), workerCode: typeof body.workerCode === "string" ? body.workerCode : undefined,
+        phone: typeof body.phone === "string" ? body.phone : undefined, address: typeof body.address === "string" ? body.address : undefined,
+        joiningDate: typeof body.joiningDate === "string" ? body.joiningDate : undefined, notes: typeof body.notes === "string" ? body.notes : undefined,
+      }) });
+    },
+  },
+  "/api/worker-profile": {
+    GET: async (req, res) => {
+      const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+      const workerId = url.searchParams.get("workerId");
+      if (!workerId) throw new HttpError(400, "workerId is required", "INVALID_WORKER");
+      sendJson(res, 200, { profile: await getWorkerProfile(tenantArgs(req), workerId) });
+    },
+  },
+  "/api/customers": {
+    GET: async (req, res) => sendJson(res, 200, { customers: await listCustomers(tenantArgs(req)) }),
+    POST: async (req, res) => {
+      const body = await readJsonBody(req);
+      sendJson(res, 201, { customer: await createCustomer(tenantArgs(req), {
+        name: String(body.name ?? ""), customerCode: typeof body.customerCode === "string" ? body.customerCode : undefined,
+        phone: typeof body.phone === "string" ? body.phone : undefined, address: typeof body.address === "string" ? body.address : undefined,
+      }) });
+    },
+  },
+  "/api/suppliers": {
+    GET: async (req, res) => sendJson(res, 200, { suppliers: await listSuppliers(tenantArgs(req)) }),
+    POST: async (req, res) => {
+      const body = await readJsonBody(req);
+      sendJson(res, 201, { supplier: await createSupplier(tenantArgs(req), {
+        name: String(body.name ?? ""), supplierCode: typeof body.supplierCode === "string" ? body.supplierCode : undefined,
+        phone: typeof body.phone === "string" ? body.phone : undefined, address: typeof body.address === "string" ? body.address : undefined,
+      }) });
+    },
+  },
+  "/api/payment-methods": {
+    GET: async (req, res) => sendJson(res, 200, { paymentMethods: await listPaymentMethods(tenantArgs(req)) }),
+    POST: async (req, res) => {
+      const body = await readJsonBody(req);
+      sendJson(res, 201, { paymentMethod: await createPaymentMethod(tenantArgs(req), String(body.name ?? ""), body.isCash === true) });
+    },
+  },
+  "/api/purchases": {
+    GET: async (req, res) => sendJson(res, 200, { purchases: await listPurchases(tenantArgs(req)) }),
+    POST: async (req, res) => {
+      const body = await readJsonBody(req);
+      const items = Array.isArray(body.items) ? body.items : [];
+      sendJson(res, 201, { result: await createPurchase(tenantArgs(req), {
+        purchaseNo: String(body.purchaseNo ?? ""),
+        workerId: typeof body.workerId === "string" ? body.workerId : undefined,
+        supplierId: typeof body.supplierId === "string" ? body.supplierId : undefined,
+        date: typeof body.date === "string" ? body.date : undefined,
+        discount: typeof body.discount === "number" ? body.discount : undefined,
+        taxAmount: typeof body.taxAmount === "number" ? body.taxAmount : undefined,
+        paidAmount: typeof body.paidAmount === "number" ? body.paidAmount : undefined,
+        notes: typeof body.notes === "string" ? body.notes : undefined,
+        items: items.map((item) => ({
+          materialId: String((item as Record<string, unknown>).materialId ?? ""),
+          quantity: Number((item as Record<string, unknown>).quantity ?? 0),
+          unit: String((item as Record<string, unknown>).unit ?? "KG"),
+          unitPrice: Number((item as Record<string, unknown>).unitPrice ?? 0),
+          notes: typeof (item as Record<string, unknown>).notes === "string" ? (item as Record<string, unknown>).notes as string : undefined,
+        })),
+      }) });
+    },
+  },
+  "/api/sales": {
+    GET: async (req, res) => sendJson(res, 200, { sales: await listSales(tenantArgs(req)) }),
+    POST: async (req, res) => {
+      const body = await readJsonBody(req);
+      const items = Array.isArray(body.items) ? body.items : [];
+      sendJson(res, 201, { result: await createSale(tenantArgs(req), {
+        saleNo: String(body.saleNo ?? ""),
+        customerId: typeof body.customerId === "string" ? body.customerId : undefined,
+        date: typeof body.date === "string" ? body.date : undefined,
+        discount: typeof body.discount === "number" ? body.discount : undefined,
+        taxAmount: typeof body.taxAmount === "number" ? body.taxAmount : undefined,
+        paidAmount: typeof body.paidAmount === "number" ? body.paidAmount : undefined,
+        notes: typeof body.notes === "string" ? body.notes : undefined,
+        items: items.map((item) => {
+          const value = item as Record<string, unknown>;
+          return { materialId: String(value.materialId ?? ""), quantity: Number(value.quantity ?? 0), unit: String(value.unit ?? "KG"), unitPrice: Number(value.unitPrice ?? 0) };
+        }),
+      }) });
+    },
+  },
+  "/api/inventory": {
+    GET: async (req, res) => sendJson(res, 200, { inventory: await getInventory(tenantArgs(req)) }),
+    POST: async (req, res) => {
+      const body = await readJsonBody(req);
+      const direction = body.direction;
+      sendJson(res, 201, { movement: await createAdjustment(tenantArgs(req), {
+        materialId: typeof body.materialId === "string" ? body.materialId : "",
+        quantity: typeof body.quantity === "number" ? body.quantity : Number.NaN,
+        unit: typeof body.unit === "string" ? body.unit : "",
+        unitCost: typeof body.unitCost === "number" ? body.unitCost : Number.NaN,
+        direction: typeof direction === "string" ? direction : "",
+        notes: typeof body.notes === "string" ? body.notes : undefined,
+      }) });
+    },
+  },
+  "/api/accounting/ledger": {
+    GET: async (req, res) => sendJson(res, 200, { ledger: await getLedger(tenantArgs(req)) }),
+  },
+  "/api/accounting/journal-entries": {
+    POST: async (req, res) => {
+      const body = await readJsonBody(req);
+      const rawLines = Array.isArray(body.lines) ? body.lines : [];
+      sendJson(res, 201, { journal: await createJournalEntry(tenantArgs(req), {
+        entryNo: typeof body.entryNo === "string" ? body.entryNo : "",
+        date: typeof body.date === "string" ? body.date : undefined,
+        referenceType: typeof body.referenceType === "string" ? body.referenceType : undefined,
+        referenceId: typeof body.referenceId === "string" ? body.referenceId : undefined,
+        description: typeof body.description === "string" ? body.description : undefined,
+        lines: rawLines.map((rawLine) => {
+          const line = rawLine as Record<string, unknown>;
+          return {
+            accountId: typeof line.accountId === "string" ? line.accountId : "",
+            debit: typeof line.debit === "number" ? line.debit : Number.NaN,
+            credit: typeof line.credit === "number" ? line.credit : Number.NaN,
+            description: typeof line.description === "string" ? line.description : undefined,
+          };
+        }),
+      }) });
+    },
+  },
+  "/api/accounting/income": {
+    POST: async (req, res) => {
+      const body = await readJsonBody(req);
+      sendJson(res, 201, { journal: await createIncome(tenantArgs(req), {
+        entryNo: typeof body.entryNo === "string" ? body.entryNo : "",
+        amount: typeof body.amount === "number" ? body.amount : Number.NaN,
+        debitAccountId: typeof body.debitAccountId === "string" ? body.debitAccountId : "",
+        incomeAccountId: typeof body.incomeAccountId === "string" ? body.incomeAccountId : "",
+        description: typeof body.description === "string" ? body.description : "",
+        date: typeof body.date === "string" ? body.date : undefined,
+      }) });
+    },
+  },
+  "/api/accounting/trial-balance": {
+    GET: async (req, res) => sendJson(res, 200, { accounts: await getTrialBalance(tenantArgs(req)) }),
+  },
+  "/api/accounting/expenses": {
+    POST: async (req, res) => {
+      const body = await readJsonBody(req);
+      sendJson(res, 201, { expense: await createExpense(tenantArgs(req), {
+        expenseNo: String(body.expenseNo ?? ""), expenseCategoryId: String(body.expenseCategoryId ?? ""),
+        amount: typeof body.amount === "number" ? body.amount : Number.NaN,
+        description: typeof body.description === "string" ? body.description : "",
+        debitAccountId: typeof body.debitAccountId === "string" ? body.debitAccountId : "",
+        creditAccountId: typeof body.creditAccountId === "string" ? body.creditAccountId : "",
+        date: typeof body.date === "string" ? body.date : undefined,
+      }) });
+    },
+  },
+  "/api/reports/dashboard": {
+    GET: async (req, res) => {
+      const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+      sendJson(res, 200, { dashboard: await getDashboard(tenantArgs(req), {
+        from: url.searchParams.get("from") ?? undefined,
+        to: url.searchParams.get("to") ?? undefined,
+      }) });
+    },
+  },
+  "/api/reports/profit-loss": {
+    GET: async (req, res) => {
+      const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+      sendJson(res, 200, { report: await getProfitAndLoss(tenantArgs(req), {
+        from: url.searchParams.get("from") ?? undefined,
+        to: url.searchParams.get("to") ?? undefined,
+      }) });
+    },
+  },
+  "/api/billing/subscription": {
+    GET: async (req, res) => sendJson(res, 200, { subscription: await getSubscription(tenantArgs(req)) }),
+  },
 };
 
 export const server = createServer((req, res) => {
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, {
+      "Access-Control-Allow-Origin": env.corsOrigin,
+      "Access-Control-Allow-Headers": "Authorization, Content-Type",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    });
+    res.end();
+    return;
+  }
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
   const routeHandlers = routes[url.pathname];
   const handler = routeHandlers?.[req.method ?? "GET"];

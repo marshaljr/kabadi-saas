@@ -1,8 +1,7 @@
 # API
 
-Phase 1 implements only the authentication foundation. Full API surface
-(workers, purchases, sales, inventory, reports, etc. — section 54 of the
-Master Build Prompt) lands progressively in Phases 3-8.
+The API includes SaaS onboarding, tenant-scoped operations, inventory,
+accounting, reports, and billing foundation endpoints.
 
 ## Auth endpoints (implemented)
 
@@ -39,8 +38,106 @@ This business-scoped token is what every future tenant-scoped endpoint
 (Phase 2+) will require, and is the only trusted source of `business_id`
 for those requests — never a request body/query parameter (section 30).
 
+### `POST /api/auth/switch-business`
+
+Same request and response as `select-business`; this alias supports a
+business-switcher UX without requiring the user to sign in again.
+
+### `POST /api/businesses`
+
+Header: `Authorization: Bearer <identity token>`
+
+```json
+{ "name": "Kathmandu Kabadi", "address": "...", "phone": "...", "planCode": "FREE" }
+```
+
+Creates a business and atomically seeds its Owner, Manager, Data Entry, and
+Collector roles, default role permissions, chart of accounts, trial
+subscription, subscription event, owner membership, and initial user usage
+record. The response includes a business-scoped access token.
+
+### `GET /api/plans`
+
+Returns active platform plan definitions and their centralized limits.
+
+### `GET /api/usage`
+
+Header: `Authorization: Bearer <business-scoped token>`
+
+Returns the current business period's usage records and the selected plan's
+limit columns. Requires the `reports.view` permission.
+
+Plan limits are enforced server-side for worker creation and purchase/sale
+transactions. Worker limits count active workers (`deleted_at IS NULL`);
+transaction limits count the `transactions` usage record for the current
+calendar month. Checks and quota updates run inside the same tenant
+transaction and serialize on the subscription row, so concurrent requests
+cannot exceed a configured limit. Successful operations increment usage once;
+failed transactions roll back the usage change.
+
+When a limit is reached, the API returns HTTP `409` with:
+`{ "error": "... limit reached (...)", "code": "PLAN_LIMIT_EXCEEDED" }`.
+Missing subscription configuration returns HTTP `403` with code
+`SUBSCRIPTION_REQUIRED`.
+
+The schema also defines `max_users`, `max_branches`, and `max_storage_mb`.
+They remain reported by the usage and plan endpoints but are not enforced
+because this repository has no user-provisioning, branch, or storage-upload
+operation to consume those quotas. Subscription statuses are likewise
+reported; no status-based blocking policy is applied because the current
+product documentation does not define one and this phase does not add payment
+collection or webhooks.
+
+### `GET /api/platform/businesses`
+
+Header: `Authorization: Bearer <identity token>`
+
+Returns businesses and subscription summaries only when the authenticated
+user has a row in `platform_admins`; ordinary users receive `403`.
+
 ### `GET /health`
 → `200` `{ "status": "ok" }`
+
+## Accounting endpoints
+
+All accounting endpoints require a business-scoped bearer token.
+
+### `POST /api/accounting/journal-entries`
+
+Creates an atomic, posted double-entry journal entry. It requires at least
+two lines, tenant-owned active accounts, exactly one positive debit or credit
+per line, and equal positive totals.
+
+```json
+{
+  "entryNo": "JE-001",
+  "description": "Cash received",
+  "lines": [
+    { "accountId": "<cash-account>", "debit": 100, "credit": 0 },
+    { "accountId": "<revenue-account>", "debit": 0, "credit": 100 }
+  ]
+}
+```
+
+### `POST /api/accounting/income`
+
+Records non-sales income as a journal entry without changing sales or stock.
+The request supplies the debit account, income account, amount, and entry
+number.
+
+### `POST /api/accounting/expenses`
+
+Creates a posted operating expense and its balanced journal entry atomically.
+The request supplies an existing expense category, debit expense account,
+credit payment/liability account, amount, and expense number.
+
+### `GET /api/accounting/ledger`
+
+Returns posted journal lines for the authenticated business.
+
+### `GET /api/accounting/trial-balance`
+
+Returns posted debit and credit totals aggregated per account.
 
 ## Error shape
 
@@ -48,11 +145,41 @@ Every error response is `{ "error": "human-readable message" }`, never a
 raw stack trace or database error (section 68) — see
 `src/lib/httpError.ts`.
 
-## Not yet implemented
+## Reports
 
-Everything else listed in Master Build Prompt section 54
-(`/api/businesses`, `/api/workers`, `/api/collections`, `/api/purchases`,
-`/api/sales`, `/api/payments`, `/api/inventory`, `/api/materials`,
-`/api/reports/*`, `/api/subscription`, `/api/usage`, `/api/plans`) is
-Phase 2+ scope. This file will be updated as each lands, per the
-project's documentation-sync rule.
+### `GET /api/reports/profit-loss`
+
+Requires `reports.view`. Optional `from` and `to` query parameters use
+inclusive `YYYY-MM-DD` dates. The report reads only `POSTED` journal entries.
+`salesRevenue` is revenue from `SALE` journals, `cogs` is posted COGS,
+`grossProfit = salesRevenue - cogs`, and
+`netProfit = grossProfit - operatingExpenses`. `otherIncome` contains
+non-sale revenue separately and is not included in `netProfit`, preserving the
+project's documented definition.
+
+The response includes `dateRange`, monetary totals as fixed two-decimal
+strings, and `breakdown` rows by revenue, COGS, and expense account.
+
+### `GET /api/reports/dashboard`
+
+Requires `reports.view`. It accepts the same inclusive `from` and `to`
+filters. Purchases, sales, and financial metrics are period-based; inventory
+quantity/value and low-stock count are current snapshots; worker count is a
+current active-worker snapshot. Existing `purchases`, `sales`, `inventory`,
+and `workers` fields are preserved, with `financial` providing revenue, COGS,
+gross profit, operating expenses, and net profit.
+
+## Worker profile
+
+### `GET /api/worker-profile?workerId=<uuid>`
+
+Requires `workers.view` and `purchases.view`. Returns the tenant-scoped worker,
+backend-calculated purchase totals, payable summary, and itemized posted
+collections. Tenant identity always comes from the bearer token.
+
+## Related operational endpoints
+
+Implemented tenant-scoped endpoints include `/api/materials`, `/api/purchases`,
+`/api/sales`, `/api/inventory`, `/api/reports/dashboard`,
+`/api/reports/profit-loss`, and
+`/api/billing/subscription`.
